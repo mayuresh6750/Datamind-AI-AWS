@@ -167,3 +167,50 @@ Keep prompts raw so the intent-to-outcome chain is traceable. Do not paraphrase 
 
 **Files modified**:
 - [prompt.md](prompt.md) ← this file
+
+---
+
+### Prompt 10 — Git Terminology Question
+
+**Raw**:
+> what do you call when you push the files to git , is it push or commit?
+
+**Interpreted intent**: Clarify the difference between a git commit and a git push.
+
+**Outcome**: Explained that both terms apply but mean different things — commit saves changes locally, push uploads them to the remote (GitHub). The correct sequence is always commit first, then push.
+
+---
+
+### Prompt 11 — Confirm Folder Access and List Files
+
+**Raw**:
+> Can you access the current folder datamind and all the files in that folder
+
+**Interpreted intent**: Verify the Datamind workspace is accessible and list all current files.
+
+**Outcome**: Confirmed access. Listed all 10 project files: `PRD.md`, `claude.md`, `architecture.md`, `errors.md`, `memory.md`, `skills.md`, `plan.md`, `planphase.md`, `team-guide.md`, `prompt.md`. Also noted the `.git` folder confirming connection to the GitHub remote.
+
+---
+
+### Prompt 12 — Create HLD.md and LLD.md
+
+**Raw**:
+> Ok..using these files ,please create a HLD.md and LLD.md
+
+**Interpreted intent**: Generate a High Level Design document and a Low Level Design document based on all existing project files.
+
+**Files created**:
+- [HLD.md](HLD.md) — High Level Design: system goals, 5-layer architecture diagram, component responsibilities, 13-step data flow, HITL checkpoints, agent set, domain packs, tech stack, dual UI screen mapping, security overview, NFRs, deployment environments, phase boundaries
+- [LLD.md](LLD.md) — Low Level Design: full DB schema (7 tables with SQL DDL), S3 path conventions, all API endpoints with request/response shapes, agent Pydantic input/output contracts, column routing algorithm, HITL state machine, LLM abstraction interface, security implementation, error codes, Celery config, observability metrics, folder structure, environment variables
+
+---
+
+### Prompt 13 — Update prompt.md
+
+**Raw**:
+> please update prompts.md
+
+**Interpreted intent**: Append all prompts from this session that were not yet logged (Prompts 10–13) to `prompt.md`.
+
+**Files modified**:
+- [prompt.md](prompt.md) ← this file
