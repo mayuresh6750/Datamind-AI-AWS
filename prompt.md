@@ -230,3 +230,20 @@ Keep prompts raw so the intent-to-outcome chain is traceable. Do not paraphrase 
 - [tasks.md](tasks.md) — 78 tasks across 5 sprints (Sprint 1–5, May 6 – Jun 6 2026), with Task ID, Role, Priority, Story Points, Dependencies
 - [generate_planner.py](generate_planner.py) — Python/openpyxl script to generate the Excel planner
 - [DataMind_Phase1_Planner.xlsx](DataMind_Phase1_Planner.xlsx) — Excel workbook: Overview sheet + 5 sprint sheets + Master Tracker; status dropdowns, frozen panes, color-coded rows
+
+---
+
+## Session 4 — 2026-05-20
+
+### Prompt 1 — Update PRD: Supabase, Weaviate, Free LLMs
+
+**Raw**:
+> Can you access datamind_AI_PRD.docx. If yes , I want you to make some changes in that PRD.First , wherever we are using AWS change it Supabase I think it's for raw ingestion and curated column layer but please check where else it is there and change to supabase..Second,for embeddings use pinecone or waviate any of this which you think is best ..this comes in textual semantic layer ..Also , for models selection , use free models for LLM calling like kimi series,mistal series,these are best ..please make these changes and generate PRD again
+
+**Interpreted intent**: (1) Find all AWS references in `DataMind_AI_PRD.docx` and replace with Supabase equivalents — primarily Supabase Storage for Layer 1/Layer 2, Supabase Database for metadata store (was AWS RDS), Supabase Vault for secrets (was AWS Secrets Manager), Redis Streams for Phase 2 job queue (was AWS SQS + Fargate). (2) Replace pgvector with Weaviate for the textual/semantic Layer 4 — chosen over Pinecone because Weaviate is open-source and self-hostable. (3) Replace Anthropic Claude + OpenAI with free-tier LLM models: Mistral series (mistral-small, mistral-7b-instruct) for Phase 1 primary, Moonshot Kimi (kimi-k2, moonshot-v1) as the second provider; Phase 2 expansion list updated to Google Gemini Flash + Groq (Llama 3) + Ollama.
+
+**Files modified**:
+- [DataMind_AI_PRD.docx](DataMind_AI_PRD.docx) — All replacements applied: 9 old AWS/pgvector/Anthropic terms → 0 remaining; Supabase Storage ×11, Weaviate ×30, Mistral ×20, Moonshot Kimi ×3
+- [PRD.md](PRD.md) — Same replacements applied to the markdown mirror
+- [DataMind_AI_PRD_original_backup.docx](DataMind_AI_PRD_original_backup.docx) — Original preserved as backup
+- [update_prd.py](update_prd.py) — Script used to make the docx changes

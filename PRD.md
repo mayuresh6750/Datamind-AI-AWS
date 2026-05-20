@@ -25,7 +25,7 @@ DataMind AI is an agentic data intelligence platform that takes a business user 
 
 The product is built around four deliberate principles. First, ask the user what domain they work in (Finance, Healthcare, Retail, Marketing, Operations, or Other) so that every downstream agent can apply domain-appropriate vocabulary, KPIs, and validation rules. Second, accept single or multiple files in CSV, XLSX, JSON, or Parquet form on day one, and let the user — not the system — decide how those files should be merged or modelled. Third, never run data cleaning silently: every cleaning step is proposed to the user as a plan, the user approves, modifies, or rejects each action, and only then does the agent execute. Fourth, route data by type — numeric and structured columns land in a relational store, free-text columns are embedded into a vector store — so analysis can use the right tool for each kind of question.
 
-DataMind is built on Next.js (frontend) and Python with FastAPI (backend), with AWS S3 for raw and curated storage, Postgres for structured/numeric data, pgvector for textual embeddings, and a configurable LLM provider abstraction so that Anthropic Claude, OpenAI, Google Gemini, Azure OpenAI, AWS Bedrock, or self-hosted models (Ollama) can be selected per tenant by an administrator. The product ships with two distinct authenticated UI surfaces: a user-facing UI for end-business-users and an admin-facing UI for tenant operators, separated by RBAC. Phase 2 introduces a Stripe-backed monetization layer with tiered subscriptions and metered usage.
+DataMind is built on Next.js (frontend) and Python with FastAPI (backend), with Supabase Storage for raw and curated storage, Postgres for structured/numeric data, Weaviate for textual/semantic embeddings, and a configurable LLM provider abstraction so that Mistral (mistral-small, mistral-7b-instruct), Moonshot Kimi (kimi-k2, moonshot-v1), Google Gemini Flash, or self-hosted models (Ollama) can be selected per tenant by an administrator. The product ships with two distinct authenticated UI surfaces: a user-facing UI for end-business-users and an admin-facing UI for tenant operators, separated by RBAC. Phase 2 introduces a Stripe-backed monetization layer with tiered subscriptions and metered usage.
 
 
 ## Vision Statement
@@ -57,7 +57,7 @@ Business analysts, founders and operators at SMBs, product managers, and small d
 - Agentic frameworks (LangGraph, function-calling models) are mature enough to coordinate multi-step data tasks reliably while pausing for human approval at well-defined checkpoints.
 - Frontier LLMs are now interchangeable enough that a thin abstraction layer (LiteLLM-compatible) lets us swap providers per tenant without rewriting agents — important for cost, compliance, and avoiding lock-in.
 - The SMB and mid-market BI segment remains underserved — existing tools either assume a data team (Looker, Tableau) or skip the cleaning layer (Julius AI, ChatGPT Code Interpreter, Power BI Copilot), and almost none of them ask the user about their domain or surface cleaning decisions transparently.
-- Apache Parquet plus serverless query engines (Athena, DuckDB) make a two-tier storage architecture cheap and operationally simple, and modern vector stores (pgvector, Pinecone) make text-data routing economical at SMB volume.
+- Apache Parquet plus serverless query engines (Athena, DuckDB) make a two-tier storage architecture cheap and operationally simple, and modern vector stores (Weaviate) make text-data routing economical at SMB volume.
 
 
 # 2. Problem Statement
@@ -95,7 +95,7 @@ The result is a familiar pattern: the people who have the questions cannot answe
 
 ## Why Now
 
-Three things changed in the last 18 months. First, frontier LLMs became good enough at structured reasoning over tables to be trusted with bounded cleaning decisions, when wrapped in guardrails and confidence scoring. Second, agent orchestration (LangGraph, structured tool-use APIs) made it feasible to compose multi-step pipelines that recover from failure rather than collapsing on the first ambiguous row. Third, serverless query and storage primitives (S3 + Athena, DuckDB on Parquet) made the two-tier raw/curated architecture affordable for a small team. Each on its own would not be enough. Together they make the product viable for a small team to ship quickly.
+Three things changed in the last 18 months. First, frontier LLMs became good enough at structured reasoning over tables to be trusted with bounded cleaning decisions, when wrapped in guardrails and confidence scoring. Second, agent orchestration (LangGraph, structured tool-use APIs) made it feasible to compose multi-step pipelines that recover from failure rather than collapsing on the first ambiguous row. Third, serverless query and storage primitives (Supabase Storage + DuckDB, DuckDB on Parquet) made the two-tier raw/curated architecture affordable for a small team. Each on its own would not be enough. Together they make the product viable for a small team to ship quickly.
 
 
 
@@ -184,7 +184,7 @@ DataMind serves four concentric groups: (1) primary users who initiate and consu
 - Cleaning plan acceptance ≥ 75% in Phase 1, ≥ 85% in Phase 2 — measured as the share of agent-proposed cleaning steps the user approves without modification, after seeing the plan.
 - Intent-to-dashboard relevance: charts judged 'on-topic' by the user ≥ 80% of the time.
 - Domain agent value: ≥ 65% of users (across covered domains) report that domain-specific suggestions changed what they did with the data.
-- LLM-provider neutrality: every agent must run end-to-end against at least two providers in Phase 1 (Anthropic + one other) with no quality regression beyond an agreed threshold.
+- LLM-provider neutrality: every agent must run end-to-end against at least two providers in Phase 1 (Mistral + Moonshot Kimi) with no quality regression beyond an agreed threshold.
 - Cost discipline: ≤ $0.30 of LLM + cloud cost per completed pipeline in Phase 1, ≤ $0.15 in Phase 2.
 - Latency: cleaning pipeline completes in under 3 minutes for files up to 100MB; dashboard rendered within 60 seconds of intent submission.
 
@@ -214,7 +214,7 @@ Phase 1 is treated explicitly as a learning milestone — targets are set so the
 
 Scope is split across two phases. Phase 1 is intentionally focused on a vertical slice that proves the end-to-end loop on a controlled surface — but expanded versus the original draft to include multi-domain support, multi-file ingestion (including Parquet), human-in-the-loop cleaning, configurable LLM providers, dual UI surfaces, and type-aware storage routing. Underneath every Phase 1 decision is the principle: ship a narrower set of features at production quality rather than a wider set half-finished.
 
-| Important honesty note: the additions to Phase 1 (multi-domain, multi-file, HITL, dual UI, configurable LLM, type-aware routing) significantly raise the bar for the 30-day window. The team is committing to ship a smaller universe of domains (4 + Other), one alternative LLM provider beyond Anthropic, and one HITL checkpoint per pipeline at a high quality bar — rather than spreading thin. Scope-cut order, in priority sequence: (1) drop Parquet input → (2) drop two domains → (3) drop second LLM provider → (4) drop JSON ingestion → (5) drop XLSX. Cleaning HITL, dual UI, and type-aware storage are non-negotiable. |
+| Important honesty note: the additions to Phase 1 (multi-domain, multi-file, HITL, dual UI, configurable LLM, type-aware routing) significantly raise the bar for the 30-day window. The team is committing to ship a smaller universe of domains (4 + Other), one alternative LLM provider beyond Mistral, and one HITL checkpoint per pipeline at a high quality bar — rather than spreading thin. Scope-cut order, in priority sequence: (1) drop Parquet input → (2) drop two domains → (3) drop second LLM provider → (4) drop JSON ingestion → (5) drop XLSX. Cleaning HITL, dual UI, and type-aware storage are non-negotiable. |
 | --- |
 
 
@@ -239,12 +239,12 @@ Roughly 30 working days. The deliverable is a working, end-to-end, multi-file, m
 
 ### Storage architecture (data type-aware routing)
 
-- Layer 1 (Raw): AWS S3 bucket with versioning, per-user prefix isolation. Original files preserved unmodified.
-- Layer 2 (Curated, columnar): AWS S3 bucket holding cleaned data in Apache Parquet format.
+- Layer 1 (Raw): Supabase Storage bucket with versioning, per-user prefix isolation. Original files preserved unmodified.
+- Layer 2 (Curated, columnar): Supabase Storage bucket holding cleaned data in Apache Parquet format.
 - Layer 3 (Numeric / structured): Postgres-managed columns (and DuckDB for fast analytical queries) hold numeric, boolean, datetime, and low-cardinality categorical data. SQL is the access path.
-- Layer 4 (Textual / semantic): pgvector hosts embeddings for free-text columns (descriptions, comments, notes). Semantic search and similarity are the access path.
+- Layer 4 (Textual / semantic): Weaviate hosts vector embeddings for free-text columns (descriptions, comments, notes). Semantic search and similarity are the access path.
 - Routing rule: the Ingestion Agent classifies each column as numeric/structured or textual based on detected dtype, cardinality, and average string length, and routes accordingly. Edge cases are flagged for the user during the HITL validation step.
-- Metadata in Postgres (RDS): users, roles, datasets, pipeline runs, HITL decisions, audit summaries, billing meters.
+- Metadata in Supabase Database (PostgreSQL): users, roles, datasets, pipeline runs, HITL decisions, audit summaries, billing meters.
 
 ### Cleaning agents — human-in-the-loop
 
@@ -258,8 +258,8 @@ Roughly 30 working days. The deliverable is a working, end-to-end, multi-file, m
 ### LLM provider abstraction
 
 - All agent LLM calls go through a provider abstraction layer (LiteLLM-compatible interface) so the underlying model is swappable.
-- Phase 1 ships with two configurable providers: Anthropic Claude and OpenAI. Provider, model, and per-agent routing are admin-controlled (e.g., cheaper model for ingestion profiling, premium model for narrative).
-- Phase 2 adds Google Gemini, Azure OpenAI, AWS Bedrock, and self-hosted Ollama support.
+- Phase 1 ships with two configurable providers: Mistral and Moonshot Kimi. Provider, model, and per-agent routing are admin-controlled (e.g., cheaper model for ingestion profiling, premium model for narrative).
+- Phase 2 adds Google Gemini Flash, Groq (Llama 3), and self-hosted Ollama support.
 - Tenant-level model defaults; per-pipeline overrides for advanced users.
 
 ### Intent and dashboard
@@ -302,7 +302,7 @@ Roughly 30 additional working days. Phase 2 widens the surface, activates moneti
 
 - Add formats: XML, PDF (text-extraction only; OCR deferred to v1.5). Cross-format merging within an upload.
 - Add cleaning agents: fuzzy duplicate detection (rapidfuzz), KNN imputation for moderately-missing numeric columns, LLM-assisted imputation for high-cardinality categorical columns, advanced outlier handling.
-- Expand LLM providers: Google Gemini, Azure OpenAI, AWS Bedrock, self-hosted Ollama.
+- Expand LLM providers: Google Gemini Flash, Groq (Llama 3), self-hosted Ollama.
 - Add 3 more domain prompt packs (e.g., Education, Manufacturing, Real Estate) and graduate the Domain Pack Editor in admin UI from read-only to editable.
 - Activate monetization: Stripe-backed subscriptions (Free / Pro / Team / Enterprise tiers), metered usage (pipelines/month, LLM token spend), in-app upgrade flow, invoice & receipt download, dunning.
 - PII detection layer: emails, phones, common ID patterns; opt-in to include in LLM context.
@@ -327,7 +327,7 @@ Roughly 30 additional working days. Phase 2 widens the surface, activates moneti
 
 # 6. System Overview (High-Level Architecture)
 
-DataMind is a three-tier, cloud-native system: a Next.js frontend with two distinct UI surfaces (user and admin), a Python/FastAPI backend, and an AWS-based data and AI infrastructure layer. The backend is structured so the agent layer is a separate service from the API gateway, allowing long-running pipelines to scale independently of synchronous request traffic. All LLM calls flow through a configurable provider abstraction, and stored data is routed by type — numeric/structured to relational stores, textual to a vector store.
+DataMind is a three-tier, cloud-native system: a Next.js frontend with two distinct UI surfaces (user and admin), a Python/FastAPI backend, and an Supabase-based data and AI infrastructure layer. The backend is structured so the agent layer is a separate service from the API gateway, allowing long-running pipelines to scale independently of synchronous request traffic. All LLM calls flow through a configurable provider abstraction, and stored data is routed by type — numeric/structured to relational stores, textual to a vector store.
 
 
 ## Architecture Diagram
@@ -346,18 +346,18 @@ Figure 1. DataMind AI end-to-end architecture. Solid arrows = control/request fl
 | Presentation — Admin UI | Next.js (separate route group /admin/*, RBAC-gated), shadcn/ui, Recharts | User management, LLM/domain config, billing & plans (P2), system health, audit log viewer, domain pack viewer (read-only P1) |
 | API Gateway (Backend) | Python 3.11+, FastAPI, Pydantic v2, JWT auth, RBAC middleware | REST API, request validation, async job dispatch, role enforcement |
 | Agent Orchestration | LangGraph (supervisor pattern), Pydantic-validated outputs | Multi-agent pipeline coordination, state machine, retry, HITL gates |
-| LLM Provider Layer | LiteLLM-compatible abstraction; Anthropic Claude + OpenAI in P1; +Gemini, Azure, Bedrock, Ollama in P2 | Per-tenant model config; per-agent routing; cost & latency tracking |
+| LLM Provider Layer | LiteLLM-compatible abstraction; Mistral (mistral-small) + Moonshot Kimi (kimi-k2) in P1; +Gemini, Azure, Bedrock, Ollama in P2 | Per-tenant model config; per-agent routing; cost & latency tracking |
 | Ingestion / Conversion | Apache Arrow, PyArrow, Pandas, openpyxl, pyarrow.parquet | Format detection, parsing, multi-file merge planning, Parquet conversion, type-routing classification |
-| Layer 1 — Raw Storage | AWS S3 (versioned bucket, per-user prefix) | Immutable source-of-truth for every uploaded file |
-| Layer 2 — Curated Storage | AWS S3 (curated prefix), Apache Parquet | Cleaned, queryable columnar data |
+| Layer 1 — Raw Storage | Supabase Storage (versioned bucket, per-user prefix) | Immutable source-of-truth for every uploaded file |
+| Layer 2 — Curated Storage | Supabase Storage (curated prefix), Apache Parquet | Cleaned, queryable columnar data |
 | Layer 3 — Numeric/Structured | Postgres + DuckDB (P1, in-process); Athena (P2) | SQL queries, aggregates over numeric/structured columns |
-| Layer 4 — Textual/Vector | pgvector on Postgres (P1); Pinecone optional (P2) | Embeddings for free-text columns; semantic search |
-| Metadata Store | PostgreSQL (AWS RDS, single-AZ in P1, Multi-AZ in P2) | Users, roles, datasets, jobs, HITL decisions, audit, billing meters |
-| Job Queue | Celery + Redis (P1); AWS SQS + Fargate workers (P2) | Async pipeline execution |
+| Layer 4 — Textual/Vector | Weaviate on Postgres (P1); Pinecone optional (P2) | Embeddings for free-text columns; semantic search |
+| Metadata Store | Supabase Database (PostgreSQL, single-AZ in P1, Multi-AZ in P2) | Users, roles, datasets, jobs, HITL decisions, audit, billing meters |
+| Job Queue | Celery + Redis (P1); Redis Streams + Celery workers (P2) | Async pipeline execution |
 | Payments (P2) | Stripe (Subscriptions + Metered Billing) | Plan tiers, usage-based charges, invoices, dunning |
 | Observability | Structured logs to CloudWatch, basic metrics; OpenTelemetry tracing in P2 | Logs, metrics, traces |
 
-The Phase 1 stack is a deliberate simplification — DuckDB instead of Athena, Celery+Redis instead of SQS+Fargate, pgvector instead of Pinecone — chosen so a small team can run the full system locally during development. Each Phase 1 choice has a documented Phase 2 successor that the API contracts already accommodate.
+The Phase 1 stack is a deliberate simplification — DuckDB instead of Athena, Celery+Redis instead of SQS+Fargate, Weaviate instead of Pinecone — chosen so a small team can run the full system locally during development. Each Phase 1 choice has a documented Phase 2 successor that the API contracts already accommodate.
 
 
 ## Data Flow
@@ -368,9 +368,9 @@ The Phase 1 stack is a deliberate simplification — DuckDB instead of Athena, C
 - 4. HITL — Validate & Merge — The user is shown the inferred schema, the proposed merge plan (union or join + key), and the proposed type-routing per column. The user confirms or overrides before any cleaning runs.
 - 5. Cleaning Plan — The Cleaning Agent generates a numbered plan (dedup, imputation, type coercion, outlier flags) with rationale and confidence per step. Nothing executes yet.
 - 6. HITL — Approve Cleaning — The user reviews the plan, can approve / modify / exclude any step, and submits. The audit log records the user's decisions.
-- 7. Execute & Route — Approved cleaning runs. Cleaned data is written to Layer 2 (curated Parquet). Numeric/structured columns are also loaded into Postgres/DuckDB; textual columns are embedded into pgvector.
+- 7. Execute & Route — Approved cleaning runs. Cleaned data is written to Layer 2 (curated Parquet). Numeric/structured columns are also loaded into Postgres/DuckDB; textual columns are embedded into Weaviate.
 - 8. Intent — The Intent Capture screen opens with domain-tuned suggestion chips. The Intent Agent embeds the user's question and matches against schema.
-- 9. Analyse — The Analysis Agent runs SQL on Postgres/DuckDB for numeric questions, semantic search on pgvector for textual ones, and combined queries when needed.
+- 9. Analyse — The Analysis Agent runs SQL on Postgres/DuckDB for numeric questions, semantic search on Weaviate for textual ones, and combined queries when needed.
 - 10. Dashboard — The Dashboard Agent generates Vega-Lite chart specs. Results render in the User UI.
 - 11. Insight — The Insights Agent generates a short, domain-flavoured narrative and a recommended next action.
 
@@ -401,13 +401,13 @@ DataMind does not hardcode any single LLM provider. Every agent calls a thin abs
 
 | Concern | How the abstraction handles it |
 | --- | --- |
-| Provider list | P1: Anthropic Claude, OpenAI. P2: + Google Gemini, Azure OpenAI, AWS Bedrock, Ollama (self-hosted). |
+| Provider list | P1: Mistral, Moonshot Kimi. P2: + Google Gemini Flash, Groq (Llama 3), Ollama (self-hosted). |
 | Per-agent routing | Admin can set, e.g., the Profiling Agent to use a small/cheap model and the Insights Agent to use a frontier model. |
 | Per-tenant defaults | Each tenant has a default provider+model. Per-pipeline override is possible for advanced users. |
 | Output schema enforcement | All agents request structured JSON. The abstraction validates against the agent's Pydantic schema regardless of provider; non-conforming outputs are retried. |
 | Cost & latency tracking | Every call records tokens, cost (per provider price book), and wall-clock latency to the metrics store, attributed to user, tenant, agent, and pipeline. |
 | Failover (P2) | If primary provider returns an error or rate-limits, the abstraction falls back to a secondary provider per tenant policy. |
-| Secrets handling | Provider API keys live in AWS Secrets Manager, retrieved per tenant; never in env files or repo. |
+| Secrets handling | Provider API keys live in Supabase Vault, retrieved per tenant; never in env files or repo. |
 
 
 ## Agent Definitions
@@ -421,8 +421,8 @@ The agent set is split across phases. Phase 1 ships the agents needed for the mu
 | Ingestion | Detects format, parses, profiles, classifies columns as numeric/structured vs textual, drafts merge plan for multi-file uploads | P1 | PyArrow, Pandas, openpyxl, python-magic, chardet, pyarrow.parquet |
 | Cleaning Plan | Drafts a numbered cleaning plan with rationale + confidence per step. Does NOT execute. | P1 | LLM via abstraction, Pandas profile |
 | Cleaning Executor | Executes only the steps the user approved at the HITL gate. Logs each action. | P1 | Pandas, Pydantic, audit logger |
-| Intent | Parses user's natural-language goal into a structured analysis spec, biased by the domain pack | P1 | LLM via abstraction, schema embeddings (pgvector) |
-| Analysis | Runs SQL on Postgres/DuckDB for numeric questions; semantic search on pgvector for textual; combined for hybrid | P1 | DuckDB, pgvector, SQL builder |
+| Intent | Parses user's natural-language goal into a structured analysis spec, biased by the domain pack | P1 | LLM via abstraction, schema embeddings (Weaviate) |
+| Analysis | Runs SQL on Postgres/DuckDB for numeric questions; semantic search on Weaviate for textual; combined for hybrid | P1 | DuckDB, Weaviate, SQL builder |
 | Dashboard | Converts analysis results into Vega-Lite specs | P1 | LLM via abstraction, fixed Vega-Lite schema set |
 | Insights | Generates a short, domain-flavoured narrative + recommended next action | P1 | LLM via abstraction |
 | Outlier (advanced) | Flags statistical outliers; recommends keep / clip / remove | P2 | scipy, scikit-learn (Isolation Forest) |
@@ -463,7 +463,7 @@ After ingestion, every column is classified into one of three buckets, which det
 | Class | Detection rule | Storage path | Access path |
 | --- | --- | --- | --- |
 | Numeric / structured | Detected dtype is int/float/bool/date; or is string but parses cleanly as one of those; or is low-cardinality categorical (≤ 50 distinct values) | Postgres table column (typed) + Parquet column | SQL on Postgres / DuckDB |
-| Textual / semantic | Detected dtype is string with avg length > 40 chars or distinct count > 50% of rows (free-form notes, descriptions, comments) | Embedded with the configured embedding model; vectors in pgvector; original strings retained in Parquet | Semantic search via pgvector |
+| Textual / semantic | Detected dtype is string with avg length > 40 chars or distinct count > 50% of rows (free-form notes, descriptions, comments) | Embedded with the configured embedding model; vectors in Weaviate; original strings retained in Parquet | Semantic search via Weaviate |
 | Ambiguous | Anything that does not cleanly fit the above (e.g., short strings that may be IDs or category labels with high cardinality) | Surfaced in HITL #1 for the user to decide | Per user choice |
 
 
@@ -488,8 +488,8 @@ Each agent's tool set is the smallest set of operations sufficient to do its job
 
 ### Long-term memory
 
-- pgvector index of column-name + column-description embeddings for schema-aware intent matching.
-- pgvector index of textual content from user data (separate namespace per tenant) for semantic queries.
+- Weaviate index of column-name + column-description embeddings for schema-aware intent matching.
+- Weaviate index of textual content from user data (separate namespace per tenant) for semantic queries.
 - Postgres tables for pipeline run history, agent decisions, HITL outcomes, and user overrides — feeding future learning loops.
 - Phase 2 adds: a curated set of 'good' intent → dashboard mappings used as few-shot examples for the Dashboard Agent, and per-domain examples for the Insights Agent.
 
@@ -560,8 +560,8 @@ Features are tagged P0 (must ship in Phase 1), P1 (Phase 2), or P2 (post-Phase-2
 | Feature ID | F1c |
 | Priority | P0 — Phase 1 |
 | User story | As an operator, I want numeric data stored relationally and textual data stored in a vector store, so each kind of question uses the right query path. |
-| Description | After HITL #1, every column is routed to its declared type-bucket: numeric/structured columns go to Postgres (typed) plus a Parquet column in the curated bucket; textual columns are embedded with the active embedding model and stored in pgvector while their original strings are retained in Parquet. Ambiguous columns surfaced in HITL #1 honour the user's choice. The Analysis Agent picks Postgres SQL or pgvector semantic search based on the question. |
-| Acceptance criteria | Column routing decisions visible in the audit log. Numeric queries ('top 10 by revenue') execute against Postgres/DuckDB. Textual queries ('mentions of refund issues') execute against pgvector. Hybrid queries combine both. |
+| Description | After HITL #1, every column is routed to its declared type-bucket: numeric/structured columns go to Postgres (typed) plus a Parquet column in the curated bucket; textual columns are embedded with the active embedding model and stored in Weaviate while their original strings are retained in Parquet. Ambiguous columns surfaced in HITL #1 honour the user's choice. The Analysis Agent picks Postgres SQL or Weaviate semantic search based on the question. |
+| Acceptance criteria | Column routing decisions visible in the audit log. Numeric queries ('top 10 by revenue') execute against Postgres/DuckDB. Textual queries ('mentions of refund issues') execute against Weaviate. Hybrid queries combine both. |
 | Edge cases | All-numeric dataset → vector store unused, no error. All-textual dataset → SQL agent skipped. Column with mostly numbers but some free-text values → user chooses at HITL #1. |
 
 
@@ -688,7 +688,7 @@ Features are tagged P0 (must ship in Phase 1), P1 (Phase 2), or P2 (post-Phase-2
 | Feature ID | F12 |
 | Priority | P0 — Phase 1 |
 | User story | As an admin, I want to choose which LLM provider runs my agents — and switch later — without my engineers rewriting the product. As a user, I want the choice abstracted from me. |
-| Description | All LLM calls flow through a LiteLLM-compatible provider abstraction. Phase 1 supports two providers, configurable per tenant: Anthropic Claude and OpenAI. Phase 2 adds Google Gemini, Azure OpenAI, AWS Bedrock, and self-hosted Ollama. The admin sets a default provider+model for the tenant and can override per agent (e.g., cheaper model for the Profiling Agent, premium model for the Insights Agent). Per-pipeline override is available for advanced users. Provider API keys are stored in AWS Secrets Manager. Cost and latency per call are recorded by provider and agent. |
+| Description | All LLM calls flow through a LiteLLM-compatible provider abstraction. Phase 1 supports two providers, configurable per tenant: Mistral and Moonshot Kimi. Phase 2 adds Google Gemini Flash, Groq (Llama 3), and self-hosted Ollama. The admin sets a default provider+model for the tenant and can override per agent (e.g., cheaper model for the Profiling Agent, premium model for the Insights Agent). Per-pipeline override is available for advanced users. Provider API keys are stored in Supabase Vault. Cost and latency per call are recorded by provider and agent. |
 | Acceptance criteria | Tenant admin can switch the default provider via Admin UI without redeploy. Switching takes effect within 5 min for new pipelines. Every agent successfully completes pipelines on both supported P1 providers in CI. Cost and latency dashboards show per-provider data. |
 | Edge cases | Provider returns malformed JSON → abstraction retries up to 3 times then escalates. Provider rate-limits → P1 surfaces error to user; P2 falls back to secondary provider. |
 
@@ -805,7 +805,7 @@ POST /api/v1/datasets/{id}/intent — response:
 
 ## External Integrations
 
-- LLM providers (configurable, see F11 / F12): Phase 1 — Anthropic Claude (default) + OpenAI; Phase 2 — Google Gemini, Azure OpenAI, AWS Bedrock, self-hosted Ollama. All accessed via the LLM Provider Abstraction; pipelines should complete on any supported provider without prompt rewrites.
+- LLM providers (configurable, see F11 / F12): Phase 1 — Mistral (default) + Moonshot Kimi; Phase 2 — Google Gemini Flash, Groq (Llama 3), self-hosted Ollama. All accessed via the LLM Provider Abstraction; pipelines should complete on any supported provider without prompt rewrites.
 - Stripe (P2): Stripe Checkout + Customer Portal + webhook listener for subscription events. PCI scope confined to Stripe — DataMind never receives raw card data.
 - Phase 2 data connectors: PostgreSQL and MySQL via SQLAlchemy. Snowflake and BigQuery deferred to v1.5 / Phase 3.
 - Webhook events emitted (Phase 2): pipeline.complete, pipeline.failed, dashboard.ready, cleaning.review_required, billing.subscription_changed, billing.payment_failed.
@@ -839,10 +839,10 @@ DataMind uses a four-layer storage architecture, with type-aware routing applied
 
 | Property | Detail |
 | --- | --- |
-| Service | AWS S3 (versioned bucket) |
+| Service | Supabase Storage (versioned bucket) |
 | Path convention | s3://datamind-raw/{user_id}/{dataset_id}/{timestamp}/{filename} |
 | Access control | IAM role with per-user prefix isolation; backend service is the only writer |
-| Encryption | Server-side AES-256 (SSE-S3 in Phase 1; SSE-KMS in Phase 2) |
+| Encryption | Server-side AES-256 (Supabase AES-256 encryption in Phase 1; Supabase AES-256 managed encryption in Phase 2) |
 | Retention | 90 days (Phase 1); configurable per workspace tier (Phase 2) |
 | Mutability | Immutable by convention; backend never overwrites or deletes from this bucket during normal operation |
 | Purpose | Source-of-truth; supports re-processing if cleaning logic changes |
@@ -852,10 +852,10 @@ DataMind uses a four-layer storage architecture, with type-aware routing applied
 
 | Property | Detail |
 | --- | --- |
-| Service | AWS S3 (curated bucket); queried via DuckDB in P1, AWS Athena in P2 |
+| Service | Supabase Storage (curated bucket); queried via DuckDB in P1, AWS Athena in P2 |
 | Path convention | s3://datamind-curated/{user_id}/{dataset_id}/v{version}/data.parquet |
 | Access control | Same per-user IAM isolation as Layer 1 |
-| Encryption | Server-side AES-256 (SSE-S3 in P1; SSE-KMS in P2) |
+| Encryption | Server-side AES-256 (Supabase AES-256 encryption in P1; Supabase AES-256 managed encryption in P2) |
 | Versioning | Each cleaning run produces a new versioned dataset; prior versions retained for 30 days |
 | Querying | DuckDB (P1, in-process); AWS Athena (P2, serverless) |
 | Purpose | Cleaned columnar snapshot; canonical source for downstream type-routing |
@@ -865,7 +865,7 @@ DataMind uses a four-layer storage architecture, with type-aware routing applied
 
 | Property | Detail |
 | --- | --- |
-| Service | PostgreSQL (RDS) for persistent storage; DuckDB attached for fast analytical queries against Parquet (P1) |
+| Service | Supabase Database (PostgreSQL) for persistent storage; DuckDB attached for fast analytical queries against Parquet (P1) |
 | Stored columns | Numeric (int, float), boolean, date/datetime, low-cardinality categorical (≤ 50 distinct values) |
 | Schema | One table per dataset_id, columns typed natively; indexed on commonly-queried fields |
 | Access path | SQL via the Analysis Agent for aggregate/numeric questions |
@@ -876,10 +876,10 @@ DataMind uses a four-layer storage architecture, with type-aware routing applied
 
 | Property | Detail |
 | --- | --- |
-| Service | pgvector extension on the same RDS instance (P1); evaluation of dedicated vector DB (Pinecone / Weaviate) in P2 |
+| Service | Weaviate extension on the same RDS instance (P1); evaluation of dedicated vector DB (Pinecone / Weaviate) in P2 |
 | Stored columns | Free-text columns (avg length > 40 chars OR cardinality > 50% of rows): descriptions, comments, notes, reviews, transcripts |
-| Embedding model | Configurable per tenant; default uses the active LLM provider's embedding endpoint (e.g., text-embedding-3-small for OpenAI, voyage-3-lite for Anthropic) |
-| Index | HNSW for cosine similarity (pgvector default settings; tuned in P2) |
+| Embedding model | Configurable per tenant; default uses the active LLM provider's embedding endpoint (e.g., text-embedding-3-small for Moonshot Kimi, voyage-3-lite for Mistral) |
+| Index | HNSW for cosine similarity (Weaviate default settings; tuned in P2) |
 | Access path | Semantic search via the Analysis Agent for textual / similarity questions |
 | Original retention | Original strings are retained in Parquet (Layer 2) so the user can always read raw text alongside vector results |
 
@@ -891,7 +891,7 @@ During ingestion, every column is classified into one of three buckets. The clas
 | Class | Rule (in order) | Routed to |
 | --- | --- | --- |
 | Numeric / structured | (a) detected dtype is int / float / bool / date / datetime; OR (b) string column where ≥ 95% of non-null values parse cleanly as one of those; OR (c) low-cardinality categorical (distinct ≤ 50 AND avg string length ≤ 40) | Layer 3 (Postgres) + Layer 2 (Parquet column) |
-| Textual / semantic | string column with avg length > 40 chars AND distinct values > 50% of row count (i.e., free-form text) | Layer 4 (pgvector embeddings) + Layer 2 (Parquet original) |
+| Textual / semantic | string column with avg length > 40 chars AND distinct values > 50% of row count (i.e., free-form text) | Layer 4 (Weaviate embeddings) + Layer 2 (Parquet original) |
 | Ambiguous | any column that does not cleanly satisfy the above (e.g., short strings with high cardinality — possibly IDs, possibly category labels) | Surfaced in HITL #1; user picks numeric or textual |
 
 
@@ -959,7 +959,7 @@ llm_provider_config
 | default_provider | ENUM | anthropic, openai (P1); + gemini, azure_openai, bedrock, ollama (P2) |
 | default_model | VARCHAR | Provider-specific model identifier |
 | per_agent_overrides | JSONB | Map: agent_name → {provider, model} |
-| secrets_arn | VARCHAR | AWS Secrets Manager ARN for this tenant's API keys |
+| secrets_arn | VARCHAR | Supabase Vault ARN for this tenant's API keys |
 | updated_at | TIMESTAMP |  |
 | updated_by_user_id | UUID | FK → users |
 
@@ -993,11 +993,11 @@ pipeline_runs
 
 ## Data Privacy
 
-- User data is never used to train any third-party model. Each configured LLM provider is set up under its enterprise / no-training-by-default terms (Anthropic workspace-level retention controls; OpenAI org-level data-sharing opt-out; equivalent settings for Phase 2 providers).
+- User data is never used to train any third-party model. Each configured LLM provider is set up under its enterprise / no-training-by-default terms (Mistral workspace-level retention controls; Moonshot Kimi org-level data-sharing opt-out; equivalent settings for Phase 2 providers).
 - PII detection (Phase 2): emails, phone numbers, common ID patterns are detected before any column data is sent to any LLM. Detected PII columns are excluded from prompts unless the user opts in.
 - Phase 1 mitigation: the Ingestion and Cleaning Plan Agents send only schema metadata and up to 5 anonymised sample rows to the LLM — never full columns. A user-facing checkbox at upload allows the user to mark a dataset as 'contains PII; do not send sample rows to LLM'; in that mode the agent operates on column statistics only.
 - All LLM prompt templates are version-controlled in Git and surfaced in the audit log along with the provider and model used.
-- Embeddings stored in pgvector are partitioned by tenant_id and never cross tenant boundaries during similarity search.
+- Embeddings stored in Weaviate are partitioned by tenant_id and never cross tenant boundaries during similarity search.
 
 ## Logging and Tracing
 
@@ -1054,9 +1054,9 @@ Three distinct log streams:
 - Authorisation (RBAC): two roles in P1 (user, admin), enforced server-side via FastAPI middleware on every endpoint. The role is a JWT claim; demotion invalidates active tokens within 15 minutes (refresh-token rotation).
 - UI separation: /admin/* routes are blocked at the API gateway for non-admin tokens (HTTP 403). The frontend additionally hides admin nav items from non-admin sessions, but the server is the source of truth.
 - Per-user prefix isolation in S3. Database row-level checks in every API handler. Tenant_id scoping on every query.
-- Encryption at rest: AES-256 (SSE-S3 in P1, SSE-KMS in P2).
+- Encryption at rest: AES-256 (AES-256 at rest (Supabase managed, P1+P2)).
 - Encryption in transit: TLS 1.3 minimum on every endpoint.
-- Secrets management: AWS Secrets Manager for every LLM provider's API key (per-tenant), database credentials, Stripe API keys. No secrets in environment files committed to Git.
+- Secrets management: Supabase Vault for every LLM provider's API key (per-tenant), database credentials, Stripe API keys. No secrets in environment files committed to Git.
 - Input sanitisation: all user-supplied strings (intent text, filenames, domain descriptors) are length-bounded and stripped of control characters before reaching any prompt or query.
 - Stripe webhook verification (P2): signature header verified on every inbound webhook before any state change.
 - Dependency hygiene: weekly automated dependency audit (npm audit, pip-audit). Critical CVEs patched within 7 days.
@@ -1128,7 +1128,7 @@ Every cleaning proposal carries a confidence score between 0.0 and 1.0, derived 
 
 - GDPR (Phase 2): right to access (data export), right to erasure (delete user + cascade), data residency on request (us-east-1 default; eu-west-1 in v1.5).
 - SOC 2 readiness: structured logging, audit trail, and access controls are designed to support a SOC 2 Type II audit in Year 2; not in scope for Phase 2 ship.
-- LLM provider compliance: each configured provider's data-retention policy is documented and surfaced in the admin UI. Anthropic and OpenAI are configured with Zero Data Retention / no-training endpoints where contractually available. The active provider's retention posture is reflected in the user-facing privacy policy.
+- LLM provider compliance: each configured provider's data-retention policy is documented and surfaced in the admin UI. Mistral and Moonshot Kimi are configured with Zero Data Retention / no-training endpoints where contractually available. The active provider's retention posture is reflected in the user-facing privacy policy.
 
 ## Audit Logging
 
@@ -1217,12 +1217,12 @@ The test pyramid is weighted toward agent evaluation. A traditional web app coul
 | Layer | Scope | Tools | Phase 1 Coverage | Phase 2 Coverage |
 | --- | --- | --- | --- | --- |
 | Unit | Agent functions, transform logic, API handlers, type-routing classifier | pytest, pytest-asyncio, vitest | ≥ 70% lines on agent layer | ≥ 85% |
-| Integration | Agent ↔ agent, S3 read/write, DuckDB queries, pgvector ops | pytest + LocalStack | Happy paths + key error paths | Full |
+| Integration | Agent ↔ agent, S3 read/write, DuckDB queries, Weaviate ops | pytest + LocalStack | Happy paths + key error paths | Full |
 | E2E (single-file) | Upload → HITL #1 → HITL #2 → dashboard for each format | Playwright (frontend), pytest (backend) | CSV + Parquet happy paths | All formats × happy + key error paths |
 | E2E (multi-file) | 2-file and 5-file uploads with union and join merge plans | Playwright + pytest | Union (CSV) + Join (CSV with shared key) | Full × all formats |
 | E2E (HITL flow) | User approves / modifies / rejects at each gate | Playwright | Approve-all + modify-step paths per gate | All decision branches per gate |
 | RBAC | Non-admin user attempts admin endpoints → 403; admin role can switch UIs; demoted user loses access within 15 min | pytest | Full Phase 1 endpoint matrix | Same + audit-log tamper resistance |
-| LLM Portability | Each agent runs end-to-end against every configured provider; outputs validated against schemas | Custom harness in CI | Anthropic + OpenAI | + Gemini, Azure, Bedrock, Ollama |
+| LLM Portability | Each agent runs end-to-end against every configured provider; outputs validated against schemas | Custom harness in CI | Mistral + Moonshot Kimi | + Gemini, Azure, Bedrock, Ollama |
 | Agent Evaluation | Cleaning plan acceptance against labelled golden datasets | Custom eval harness | 10-dataset golden set, ≥ 75% acceptance per provider | 20+ dataset golden set, ≥ 85% |
 | Domain Regression | Per-domain prompt-pack outputs match expected vocabulary, KPI suggestions, validation flags | Custom harness with per-domain fixtures | 4 domains × 5 fixtures = 20 cases | 7 domains × 10 fixtures |
 | Intent / Dashboard Eval | Intent–chart relevance on a labelled benchmark, broken down by domain | Custom harness; manual labelling | 20-intent benchmark, ≥ 70% relevance | 50-intent benchmark, ≥ 80% relevance |
@@ -1305,11 +1305,11 @@ Phase 1 introduces feature flags for: each cleaning agent, each chart type in th
 
 ## Secrets and Configuration
 
-All secrets live in AWS Secrets Manager and are retrieved at runtime by the FastAPI service via IAM role. Nothing sensitive lives in env files or the repository.
+All secrets live in Supabase Vault and are retrieved at runtime by the FastAPI service via IAM role. Nothing sensitive lives in env files or the repository.
 
 | Secret | Purpose | Phase |
 | --- | --- | --- |
-| LLM_PROVIDER_KEYS (per tenant, per provider) | API keys for Anthropic, OpenAI in P1; +Gemini, Azure, Bedrock in P2 | P1 / P2 |
+| LLM_PROVIDER_KEYS (per tenant, per provider) | API keys for Mistral, Moonshot Kimi in P1; +Gemini, Azure, Bedrock in P2 | P1 / P2 |
 | DATABASE_URL | Postgres connection string | P1 |
 | JWT_SIGNING_KEY | JWT HS256 secret; rotated quarterly | P1 |
 | S3_BUCKET_NAMES | Raw + curated bucket identifiers per env | P1 |
@@ -1416,8 +1416,8 @@ DataMind ships two distinct authenticated UI surfaces: a User UI for end users (
 
 ### A3. LLM Provider Configuration
 
-- Default provider + model picker (P1: Anthropic Claude, OpenAI). Per-agent override matrix (Profiling, Cleaning Plan, Intent, Dashboard, Insights). Saving applies to the next pipeline (no redeploy).
-- Provider key entry / rotation (writes to AWS Secrets Manager via backend; the UI never displays the key after entry).
+- Default provider + model picker (P1: Mistral, Moonshot Kimi). Per-agent override matrix (Profiling, Cleaning Plan, Intent, Dashboard, Insights). Saving applies to the next pipeline (no redeploy).
+- Provider key entry / rotation (writes to Supabase Vault via backend; the UI never displays the key after entry).
 - Per-provider usage panel: tokens, cost, latency, error rate over the last 30 days.
 
 ### A4. Domain Prompt Pack Viewer (P1) / Editor (P2)
@@ -1464,9 +1464,9 @@ Five working weeks. The plan below is honest about how much has been packed into
 
 | Week | Dates | Focus | Exit Criteria |
 | --- | --- | --- | --- |
-| Week 1 | 6–12 May | Foundation: AWS infra (Terraform), CI/CD skeleton, Postgres schema (incl. roles, tenant, billing-scaffold tables), FastAPI scaffold with RBAC middleware, Next.js shell with /app and /admin route trees, JWT auth with role claim, LLM Provider Abstraction (LiteLLM-compatible) with Anthropic + OpenAI wired | A test user can sign up, log in, and hit /health. An admin user can hit /admin/health (and a non-admin gets 403). CI/CD deploys to staging on merge. A canary agent prompt completes on both Anthropic and OpenAI. |
+| Week 1 | 6–12 May | Foundation: AWS infra (Terraform), CI/CD skeleton, Postgres schema (incl. roles, tenant, billing-scaffold tables), FastAPI scaffold with RBAC middleware, Next.js shell with /app and /admin route trees, JWT auth with role claim, LLM Provider Abstraction (LiteLLM-compatible) with Mistral + Moonshot Kimi wired | A test user can sign up, log in, and hit /health. An admin user can hit /admin/health (and a non-admin gets 403). CI/CD deploys to staging on merge. A canary agent prompt completes on both Mistral and Moonshot Kimi. |
 | Week 2 | 13–19 May | Domain Selection screen + Domain Agent + four prompt packs (Finance, Healthcare, Retail, Marketing) + Other/Operations generic. Multi-file presigned-URL upload to S3 Layer 1 (CSV, XLSX, JSON, Parquet). Format Detection + Profiling Agent (incl. numeric/textual classification). Schema & Merge Validation screen (HITL #1) + decision endpoint | User picks a domain on first run; selection persists. Multi-file CSV/XLSX/JSON/Parquet upload lands in Layer 1. HITL #1 screen renders inferred schema + proposed merge for ≥ 2-file uploads. |
-| Week 3 | 20–26 May | Conversion Agent (multi-file → unified Parquet via approved merge). Type-aware storage routing: numeric/structured → Postgres + Parquet; textual → pgvector + Parquet. Cleaning Plan Agent (drafts plan; does not execute). HITL #2 Cleaning Plan Review screen + decision endpoint. Cleaning Executor (runs only approved steps). Audit log persistence | Cleaning plan generated and rendered on HITL #2 for golden datasets 1–5. ≥ 60% of plan steps approved without modification. Cleaning never runs without a user decision. |
+| Week 3 | 20–26 May | Conversion Agent (multi-file → unified Parquet via approved merge). Type-aware storage routing: numeric/structured → Postgres + Parquet; textual → Weaviate + Parquet. Cleaning Plan Agent (drafts plan; does not execute). HITL #2 Cleaning Plan Review screen + decision endpoint. Cleaning Executor (runs only approved steps). Audit log persistence | Cleaning plan generated and rendered on HITL #2 for golden datasets 1–5. ≥ 60% of plan steps approved without modification. Cleaning never runs without a user decision. |
 | Week 4 | 27 May – 2 June | Intent Agent (HITL #3 with restatement). Analysis Agent (SQL on numeric, vector search on textual, hybrid). Dashboard Agent (KPI cards + 2 chart types, Vega-Lite). Insights Agent (basic narrative, domain-flavoured). Frontend polish: User UI screens U1–U8. Admin UI scaffold: A1 Health, A2 Users, A3 LLM Config, A4 Domain Pack viewer, A5 Audit | End-to-end happy path works for CSV and a 2-file Parquet merge. Internal team member completes the full flow unaided. Admin can switch LLM provider mid-pipeline. |
 | Week 5 | 3–10 June | Hardening: error states across both UIs, retry, observability dashboards, security review (RBAC isolation tests, JWT role claim handling), expand golden set to 10 datasets, manual smoke testing on real-world files, Phase-2 Stripe-billing scaffolding (tables only) | All Phase 1 NFR targets met. ≥ 70% cleaning plan acceptance on the golden set. RBAC isolation passes. Domain agent helpful-rate ≥ 60% in internal survey. Demo-ready. |
 
@@ -1476,8 +1476,8 @@ Five working weeks. The plan below is honest about how much has been packed into
 - End-to-end pipeline (domain → multi-file upload → HITL #1 → conversion + type-routing → HITL #2 cleaning → execute → intent → dashboard → insights) works for CSV, XLSX, JSON, and Parquet.
 - Cleaning Plan acceptance rate ≥ 70% on the 10-dataset internal golden set. HITL #1 + HITL #2 cycle time < 90s median.
 - Audit log present for every agent decision and every HITL decision (approve / modify / reject + rationale).
-- Two-layer S3 storage live (raw + curated Parquet); Postgres holds numeric/structured; pgvector holds textual embeddings; type-routing decisions visible in audit log.
-- LLM Provider Abstraction live with two providers (Anthropic + OpenAI). Admin can switch provider tenant-wide; per-agent override functional.
+- Two-layer S3 storage live (raw + curated Parquet); Postgres holds numeric/structured; Weaviate holds textual embeddings; type-routing decisions visible in audit log.
+- LLM Provider Abstraction live with two providers (Mistral + Moonshot Kimi). Admin can switch provider tenant-wide; per-agent override functional.
 - Dual UI shipped: User UI (U1–U8) and Admin UI (A1–A5). RBAC enforced server-side; non-admin GET /admin/* returns 403.
 - CI/CD pipeline shipping to staging and prod automatically. Stripe billing tables scaffolded (no live charges).
 - Internal-only beta with 5 internal users running real workflows for one week without engineering intervention.
@@ -1490,7 +1490,7 @@ Phase 2 layers public-beta readiness, the full monetization loop, and the higher
 | Week | Dates | Focus | Exit Criteria |
 | --- | --- | --- | --- |
 | Week 6 | 11–17 June | Phase-2 advanced cleaning agents: Outlier (IQR + Isolation Forest), Fuzzy Dedup (rapidfuzz), KNN imputation, LLM-assisted imputation for high-cardinality categoricals — all integrated into HITL #2. PII Detection Agent gates LLM context. XML and PDF ingestion added to F1 | ≥ 80% cleaning plan acceptance on a 20-dataset golden set. PII columns excluded from LLM prompts by default. |
-| Week 7 | 18–24 June | LLM provider expansion: Google Gemini, Azure OpenAI, AWS Bedrock, self-hosted Ollama wired into the abstraction. Per-provider failover. Domain Pack Editor (Admin A4) graduates from viewer to full editor with versioning + 4-eye approval. Two new domain packs (Education, Manufacturing) | Pipeline completes on ≥ 4 providers in CI. Domain admin can edit a pack and the next pipeline reflects it. Provider failover demonstrated under simulated outage. |
+| Week 7 | 18–24 June | LLM provider expansion: Google Gemini Flash, Groq (Llama 3), self-hosted Ollama wired into the abstraction. Per-provider failover. Domain Pack Editor (Admin A4) graduates from viewer to full editor with versioning + 4-eye approval. Two new domain packs (Education, Manufacturing) | Pipeline completes on ≥ 4 providers in CI. Domain admin can edit a pack and the next pipeline reflects it. Provider failover demonstrated under simulated outage. |
 | Week 8 | 25 June – 1 July | Iterative Q&A (F9). Expanded chart types and drill-down. Dashboard export (PDF/PNG). Public REST API endpoints + OpenAPI docs (F10). Project / workspace organisation (F8) | Follow-up Q&A under 30s. API documented and JWT-protected. Projects load < 1s for 50 datasets. |
 | Week 9 | 2–7 July | Monetization wiring: Stripe Checkout, Customer Portal, webhook listener with signature verification + idempotency. Admin UI A6 (Billing & Plans) becomes live. Dunning email workflow. OpenTelemetry tracing across services. Auto-scaling Fargate workers (SQS-driven). Migration to Athena for queries. Multi-AZ RDS | A test user can subscribe to Pro via Stripe and see plan + invoice in Admin UI within 30s. Failed-payment dunning emails fire. All Phase 2 NFR targets met. Load test passes 1,000 concurrent pipelines. |
 | Week 10 | 8–10 July | Closed-beta launch with 20–30 external users across 3+ domains. Bug-fix triage. Documentation polish (user docs + API docs) | Beta users completing first pipeline ≥ 80%. NPS ≥ 40 from beta survey. ≥ 1 paying Pro subscriber from the beta cohort. |
@@ -1530,7 +1530,7 @@ Product-led growth (PLG) with a free tier generous enough to onboard solo analys
 
 | Tier | Price (USD) | Target User | Limits | Key Features |
 | --- | --- | --- | --- | --- |
-| Free | $0 / mo | Solo analysts, SMB founders, students | 5 datasets, 1 GB storage, 10 pipelines / mo, 1 active domain | Phase 1 features: multi-format multi-file ingestion (incl. Parquet), HITL cleaning, type-aware routing, 2 chart types, default LLM provider (Anthropic Claude) |
+| Free | $0 / mo | Solo analysts, SMB founders, students | 5 datasets, 1 GB storage, 10 pipelines / mo, 1 active domain | Phase 1 features: multi-format multi-file ingestion (incl. Parquet), HITL cleaning, type-aware routing, 2 chart types, default LLM provider (Mistral) |
 | Pro | $49 / mo | Analysts, founders, individual data users | Unlimited datasets, 50 GB storage, 500 pipelines / mo | All cleaning agents (P2), all chart types, PDF export, public API access, follow-up Q&A, choice of any supported LLM provider |
 | Team | $199 / mo (up to 10 users) | Analytics teams at SMBs | 200 GB storage, team workspaces, shared dashboards, 5,000 pipelines / mo | Pro features + team workspaces, multiple admins, SSO (Phase 3+), priority support, custom domain pack |
 | Enterprise | Custom | Mid-market and up | Custom storage, SLA, dedicated support | Team features + custom agents, SAML, audit-log export, residency choice, BYO LLM (incl. Bedrock + Ollama) |
@@ -1610,7 +1610,7 @@ DataMind's positioning: the only tool that takes a raw, messy file from an SMB o
 | Multi-file merge inference is wrong, surfacing bad join keys at HITL #1 | Medium | Medium | User is the final arbiter — a wrong proposal becomes a manual override, not a silent failure. Cartesian-explosion warning gates risky joins. Internal benchmark covers 5 multi-file shapes. |
 | LLM provider abstraction leaks provider-specific quirks (response schemas, function-call formats) | Medium | Medium | LiteLLM-compatible adapter layer normalises responses; Pydantic schemas validate every response regardless of provider. Per-provider regression tests in CI. |
 | DuckDB cannot handle expected query patterns at scale | Low | Medium | DuckDB is well-proven for the planned data sizes. Phase 2 migrates to Athena, the documented escape hatch. |
-| Postgres + pgvector cannot scale embedding store beyond a few thousand datasets | Low | Low | Sufficient for Phase 1 + 2. Pinecone migration has a known path. |
+| Postgres + Weaviate cannot scale embedding store beyond a few thousand datasets | Low | Low | Sufficient for Phase 1 + 2. Pinecone migration has a known path. |
 | S3 or AWS region outage | Low | High | Phase 2: multi-AZ Postgres. Status page from day one. Pipeline queue retains failed jobs for replay. |
 | Stripe webhook outage / delayed delivery | Low | Medium | Stripe retries + idempotency on event_id. UI shows 'subscription processing' state for ≤ 60s rather than blocking access. Manual reconciliation runbook documented. |
 
@@ -1642,15 +1642,15 @@ DataMind's positioning: the only tool that takes a raw, messy file from an SMB o
 
 ## External Dependencies
 
-- LLM provider availability (configurable; Phase 1 uses Anthropic + OpenAI). The configurable abstraction (F11) is the primary mitigation against single-vendor risk.
+- LLM provider availability (configurable; Phase 1 uses Mistral + Moonshot Kimi). The configurable abstraction (F11) is the primary mitigation against single-vendor risk.
 - Stripe (P2): payment processing, hosted Checkout, hosted Customer Portal, webhook delivery.
 - AWS regional availability for the chosen primary region (us-east-1).
-- Open-source library health: Pandas, PyArrow, DuckDB, pgvector, LangGraph, LiteLLM, Vega-Lite, Recharts, FastAPI.
+- Open-source library health: Pandas, PyArrow, DuckDB, Weaviate, LangGraph, LiteLLM, Vega-Lite, Recharts, FastAPI.
 - GitHub availability (CI/CD).
 
 ## Key Assumptions
 
-- A frontier-class LLM (Anthropic Claude or equivalent) remains available, performant, and affordable at the required token volumes.
+- A frontier-class LLM (Mistral or equivalent) remains available, performant, and affordable at the required token volumes.
 - ≥ 70% cleaning acceptance is achievable in Phase 1 for the most common data-quality patterns (duplicates, nulls, type errors) without custom fine-tuning.
 - Apache Parquet + DuckDB / Athena can comfortably handle the Phase 1 + Phase 2 data volumes (up to ~5 GB per user) within the latency targets.
 - Users will accept an LLM-driven product that handles their business data, given the visible privacy controls (two-layer storage, audit log, opt-in PII handling).
@@ -1666,9 +1666,9 @@ Items that need resolution before they become blocking. Each has an owner and a 
 | --- | --- | --- | --- | --- |
 | OQ-01 | Final order of the Phase 1 scope-cut sequence (per Section 5 callout)? | Product | By 12 May | Proposed: drop Parquet → drop two domains → drop second LLM → drop JSON → drop XLSX. HITL, dual UI, type-routing non-negotiable. |
 | OQ-02 | Which four domains ship full prompt packs in P1, and in what order? | Product + Domain SMEs | By 12 May | Proposed: Finance and Retail first (highest demand signal), Healthcare and Marketing in week 2. |
-| OQ-03 | Which is the second LLM provider for P1 (OpenAI assumed)? | Engineering + Procurement | By 12 May | OpenAI is the default assumption. Confirm pricing terms; alternative is Bedrock if AWS volume discount applies. |
+| OQ-03 | Which is the second LLM provider for P1 (Moonshot Kimi assumed)? | Engineering + Procurement | By 12 May | Moonshot Kimi is the default assumption. Confirm pricing terms; alternative is Bedrock if AWS volume discount applies. |
 | OQ-04 | Default per-agent model routing — which agents get the cheaper model? | Engineering | By 12 May | Proposed: Profiling + Cleaning Plan on cheap model; Intent + Insights on premium. Validate against acceptance metrics. |
-| OQ-05 | Embedding model for pgvector — provider's default or a single neutral choice? | Engineering + AI | By 12 May | Per-provider default is simpler but mixes vector spaces if a tenant switches providers. A neutral choice (e.g., bge-small) avoids re-embedding on swap. |
+| OQ-05 | Embedding model for Weaviate — provider's default or a single neutral choice? | Engineering + AI | By 12 May | Per-provider default is simpler but mixes vector spaces if a tenant switches providers. A neutral choice (e.g., bge-small) avoids re-embedding on swap. |
 | OQ-06 | Should the audit log be append-only / WORM from day one, or in Phase 2? | Legal + Product | By 12 May | Phase 1 'immutable by convention' may suffice for internal beta; WORM is a real cost. |
 | OQ-07 | Are XLSX files with multiple sheets handled in Phase 1 (prompt user) or deferred? | Product | By 19 May | Recommend: P1 prompts user to pick the sheet at upload. P2 auto-detects. |
 | OQ-08 | Does the Phase 1 dashboard allow user customisation, or is it strictly LLM-generated? | Product + Design | By 19 May | Recommend: strictly LLM-generated in P1. Customisation in P2. |
@@ -1677,7 +1677,7 @@ Items that need resolution before they become blocking. Each has an owner and a 
 | OQ-11 | HITL pause auto-timeout — should pending HITL decisions expire after N hours and how? | Product | By 26 May | P1: no timeout (just persists). P2: tenant-configurable auto-approve-after-N-hours setting. |
 | OQ-12 | Type-routing thresholds (avg-length, distinct-pct) — keep proposed defaults or A/B against real data? | AI + Product | By 26 May | Defaults: avg > 40 chars, distinct > 50%. Validate against the golden set in Week 2. |
 | OQ-13 | What is the chunking strategy for files > 100 MB in Phase 2? | Engineering | By 17 June | Affects Pandas one-pass vs. PyArrow ChunkedArray streaming. |
-| OQ-14 | Pinecone vs. continuing on pgvector for Phase 2? | Engineering | By 17 June | Default: stay on pgvector unless > 100K embeddings and latency suffers. |
+| OQ-14 | Pinecone vs. continuing on Weaviate for Phase 2? | Engineering | By 17 June | Default: stay on Weaviate unless > 100K embeddings and latency suffers. |
 | OQ-15 | Free tier limits — what numbers actually map to a real Pro-conversion funnel? | Product + Growth | By 24 June | Proposed: 5 datasets, 10 pipelines/mo, 1 GB. Re-tune from beta data. |
 | OQ-16 | Should Phase 3 dashboard sharing default to public-link or authenticated-only? | Product + Legal | By 1 July | Public link is a viral lever; authenticated-only is safer for B2B trust. |
 | OQ-17 | EU data residency: do we need a separate eu-west-1 deployment at Phase 3 launch? | Legal + Engineering | By 7 July | Depends on whether P2 closed-beta includes EU users with PII. |
