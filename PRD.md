@@ -280,7 +280,7 @@ Roughly 30 working days. The deliverable is a working, end-to-end, multi-file, m
 ### Operational essentials
 
 - CI/CD pipeline (GitHub Actions): lint, type-check, unit tests, image build, deploy to staging and prod on merge.
-- Structured JSON logging, basic CloudWatch dashboards, error alerting via email.
+- Structured JSON logging, basic Prometheus/Grafana dashboards, error alerting via email.
 - Internal-use only at the end of Phase 1. Not yet a public product. No payments charged.
 
 ## Phase 1 — Out of Scope (deferred to Phase 2)
@@ -355,9 +355,9 @@ Figure 1. DataMind AI end-to-end architecture. Solid arrows = control/request fl
 | Metadata Store | Supabase Database (PostgreSQL, single-AZ in P1, Multi-AZ in P2) | Users, roles, datasets, jobs, HITL decisions, audit, billing meters |
 | Job Queue | Celery + Redis (P1); Redis Streams + Celery workers (P2) | Async pipeline execution |
 | Payments (P2) | Stripe (Subscriptions + Metered Billing) | Plan tiers, usage-based charges, invoices, dunning |
-| Observability | Structured logs to CloudWatch, basic metrics; OpenTelemetry tracing in P2 | Logs, metrics, traces |
+| Observability | Structured logs to Prometheus/Grafana, basic metrics; OpenTelemetry tracing in P2 | Logs, metrics, traces |
 
-The Phase 1 stack is a deliberate simplification — DuckDB instead of Athena, Celery+Redis instead of SQS+Fargate, Weaviate instead of Pinecone — chosen so a small team can run the full system locally during development. Each Phase 1 choice has a documented Phase 2 successor that the API contracts already accommodate.
+The Phase 1 stack is a deliberate simplification — DuckDB instead of Athena, Celery+Redis instead of SQS+Docker (containerised), Weaviate instead of Pinecone — chosen so a small team can run the full system locally during development. Each Phase 1 choice has a documented Phase 2 successor that the API contracts already accommodate.
 
 
 ## Data Flow
@@ -852,12 +852,12 @@ DataMind uses a four-layer storage architecture, with type-aware routing applied
 
 | Property | Detail |
 | --- | --- |
-| Service | Supabase Storage (curated bucket); queried via DuckDB in P1, AWS Athena in P2 |
-| Path convention | s3://datamind-curated/{user_id}/{dataset_id}/v{version}/data.parquet |
+| Service | Supabase Storage (curated bucket); queried via DuckDB in P1 and P2 |
+| Path convention | supabase://datamind-curated/{user_id}/{dataset_id}/v{version}/data.parquet |
 | Access control | Same per-user IAM isolation as Layer 1 |
 | Encryption | Server-side AES-256 (Supabase AES-256 encryption in P1; Supabase AES-256 managed encryption in P2) |
 | Versioning | Each cleaning run produces a new versioned dataset; prior versions retained for 30 days |
-| Querying | DuckDB (P1, in-process); AWS Athena (P2, serverless) |
+| Querying | DuckDB (P1 and P2, in-process; scales with Supabase Storage) |
 | Purpose | Cleaned columnar snapshot; canonical source for downstream type-routing |
 
 
@@ -1036,7 +1036,7 @@ Three distinct log streams:
 | Max file size per upload (single file) | 50 MB | 500 MB |
 | Max upload total size | 250 MB | 5 GB |
 | Curated storage per user | 5 GB | 1 TB+ (Pro) |
-| Auto-scaling | Manual scaling on a single ECS service | Auto-scaling Fargate workers driven by SQS queue depth |
+| Auto-scaling | Manual scaling on a single ECS service | Auto-scaling Celery workers driven by SQS queue depth |
 
 
 ## Reliability
@@ -1144,10 +1144,10 @@ Every cleaning proposal carries a confidence score between 0.0 and 1.0, derived 
 
 | Telemetry | Phase 1 | Phase 2 |
 | --- | --- | --- |
-| Logs | Structured JSON via structlog → CloudWatch Logs | Same; with CloudWatch Insights queries productionised |
-| Metrics | Custom Prometheus-format metrics → CloudWatch Embedded Metric Format | Same; Grafana dashboards added |
-| Traces | Not in scope for Phase 1 | OpenTelemetry SDK across FastAPI services + agent steps; AWS X-Ray exporter |
-| Alerts | CloudWatch alarms → email | PagerDuty integration |
+| Logs | Structured JSON via structlog → Prometheus/Grafana Logs | Same; with Prometheus/Grafana Insights queries productionised |
+| Metrics | Custom Prometheus-format metrics → Prometheus/Grafana Embedded Metric Format | Same; Grafana dashboards added |
+| Traces | Not in scope for Phase 1 | OpenTelemetry SDK across FastAPI services + agent steps; Grafana Tempo exporter |
+| Alerts | Prometheus/Grafana alerts → email | PagerDuty integration |
 
 
 ## Key Service Metrics
@@ -1261,7 +1261,7 @@ Whenever the LLM model version, prompt template, agent tool schema, or default p
 
 ## Infrastructure as Code
 
-- All AWS infrastructure defined in Terraform. State stored in S3 with DynamoDB lock.
+- All infrastructure defined in Terraform. State stored in Supabase Storage with PostgreSQL lock.
 - No manual console changes permitted in staging or production. Dev environment can be created locally with Docker Compose + LocalStack.
 
 ## CI/CD Pipeline
@@ -1282,14 +1282,14 @@ GitHub Actions handles every step. The pipeline is intentionally short and fast 
 | --- | --- | --- | --- | --- |
 | Dev (local) | Developer machines | Docker Compose + LocalStack | Docker Compose + LocalStack | Synthetic data only |
 | Staging | Integration + E2E + agent evaluation | Single ECS service, single RDS | 25% of prod capacity | Anonymised production-shape data |
-| Production | Live traffic | Single ECS, single-AZ RDS | Auto-scaling Fargate, Multi-AZ RDS | Per-user prefix isolation; full encryption |
+| Production | Live traffic | Single ECS, single-AZ RDS | Auto-scaling Docker (containerised), Multi-AZ RDS | Per-user prefix isolation; full encryption |
 
 
 ## Container Strategy
 
 - Each service (API gateway, agent worker, frontend) is a separate Docker container.
 - Base images: python:3.11-slim for backend; node:20-alpine for Next.js.
-- Images pushed to AWS ECR. Phase 1 deploys via AWS ECS on Fargate (single task per service); Phase 2 introduces auto-scaling Fargate workers driven by SQS queue depth for agent jobs.
+- Images pushed to GitHub Container Registry (GHCR). Phase 1 deploys via Docker Compose (single container per service); Phase 2 introduces auto-scaling workers driven by Redis queue depth for agent jobs.
 
 ## Rollback Strategy
 
@@ -1464,7 +1464,7 @@ Five working weeks. The plan below is honest about how much has been packed into
 
 | Week | Dates | Focus | Exit Criteria |
 | --- | --- | --- | --- |
-| Week 1 | 6–12 May | Foundation: AWS infra (Terraform), CI/CD skeleton, Postgres schema (incl. roles, tenant, billing-scaffold tables), FastAPI scaffold with RBAC middleware, Next.js shell with /app and /admin route trees, JWT auth with role claim, LLM Provider Abstraction (LiteLLM-compatible) with Mistral + Moonshot Kimi wired | A test user can sign up, log in, and hit /health. An admin user can hit /admin/health (and a non-admin gets 403). CI/CD deploys to staging on merge. A canary agent prompt completes on both Mistral and Moonshot Kimi. |
+| Week 1 | 6–12 May | Foundation: Supabase setup + Terraform, CI/CD skeleton, Postgres schema (incl. roles, tenant, billing-scaffold tables), FastAPI scaffold with RBAC middleware, Next.js shell with /app and /admin route trees, JWT auth with role claim, LLM Provider Abstraction (LiteLLM-compatible) with Mistral + Moonshot Kimi wired | A test user can sign up, log in, and hit /health. An admin user can hit /admin/health (and a non-admin gets 403). CI/CD deploys to staging on merge. A canary agent prompt completes on both Mistral and Moonshot Kimi. |
 | Week 2 | 13–19 May | Domain Selection screen + Domain Agent + four prompt packs (Finance, Healthcare, Retail, Marketing) + Other/Operations generic. Multi-file presigned-URL upload to S3 Layer 1 (CSV, XLSX, JSON, Parquet). Format Detection + Profiling Agent (incl. numeric/textual classification). Schema & Merge Validation screen (HITL #1) + decision endpoint | User picks a domain on first run; selection persists. Multi-file CSV/XLSX/JSON/Parquet upload lands in Layer 1. HITL #1 screen renders inferred schema + proposed merge for ≥ 2-file uploads. |
 | Week 3 | 20–26 May | Conversion Agent (multi-file → unified Parquet via approved merge). Type-aware storage routing: numeric/structured → Postgres + Parquet; textual → Weaviate + Parquet. Cleaning Plan Agent (drafts plan; does not execute). HITL #2 Cleaning Plan Review screen + decision endpoint. Cleaning Executor (runs only approved steps). Audit log persistence | Cleaning plan generated and rendered on HITL #2 for golden datasets 1–5. ≥ 60% of plan steps approved without modification. Cleaning never runs without a user decision. |
 | Week 4 | 27 May – 2 June | Intent Agent (HITL #3 with restatement). Analysis Agent (SQL on numeric, vector search on textual, hybrid). Dashboard Agent (KPI cards + 2 chart types, Vega-Lite). Insights Agent (basic narrative, domain-flavoured). Frontend polish: User UI screens U1–U8. Admin UI scaffold: A1 Health, A2 Users, A3 LLM Config, A4 Domain Pack viewer, A5 Audit | End-to-end happy path works for CSV and a 2-file Parquet merge. Internal team member completes the full flow unaided. Admin can switch LLM provider mid-pipeline. |
@@ -1492,7 +1492,7 @@ Phase 2 layers public-beta readiness, the full monetization loop, and the higher
 | Week 6 | 11–17 June | Phase-2 advanced cleaning agents: Outlier (IQR + Isolation Forest), Fuzzy Dedup (rapidfuzz), KNN imputation, LLM-assisted imputation for high-cardinality categoricals — all integrated into HITL #2. PII Detection Agent gates LLM context. XML and PDF ingestion added to F1 | ≥ 80% cleaning plan acceptance on a 20-dataset golden set. PII columns excluded from LLM prompts by default. |
 | Week 7 | 18–24 June | LLM provider expansion: Google Gemini Flash, Groq (Llama 3), self-hosted Ollama wired into the abstraction. Per-provider failover. Domain Pack Editor (Admin A4) graduates from viewer to full editor with versioning + 4-eye approval. Two new domain packs (Education, Manufacturing) | Pipeline completes on ≥ 4 providers in CI. Domain admin can edit a pack and the next pipeline reflects it. Provider failover demonstrated under simulated outage. |
 | Week 8 | 25 June – 1 July | Iterative Q&A (F9). Expanded chart types and drill-down. Dashboard export (PDF/PNG). Public REST API endpoints + OpenAPI docs (F10). Project / workspace organisation (F8) | Follow-up Q&A under 30s. API documented and JWT-protected. Projects load < 1s for 50 datasets. |
-| Week 9 | 2–7 July | Monetization wiring: Stripe Checkout, Customer Portal, webhook listener with signature verification + idempotency. Admin UI A6 (Billing & Plans) becomes live. Dunning email workflow. OpenTelemetry tracing across services. Auto-scaling Fargate workers (SQS-driven). Migration to Athena for queries. Multi-AZ RDS | A test user can subscribe to Pro via Stripe and see plan + invoice in Admin UI within 30s. Failed-payment dunning emails fire. All Phase 2 NFR targets met. Load test passes 1,000 concurrent pipelines. |
+| Week 9 | 2–7 July | Monetization wiring: Stripe Checkout, Customer Portal, webhook listener with signature verification + idempotency. Admin UI A6 (Billing & Plans) becomes live. Dunning email workflow. OpenTelemetry tracing across services. Auto-scaling Celery workers (SQS-driven). Migration to Athena for queries. Multi-AZ RDS | A test user can subscribe to Pro via Stripe and see plan + invoice in Admin UI within 30s. Failed-payment dunning emails fire. All Phase 2 NFR targets met. Load test passes 1,000 concurrent pipelines. |
 | Week 10 | 8–10 July | Closed-beta launch with 20–30 external users across 3+ domains. Bug-fix triage. Documentation polish (user docs + API docs) | Beta users completing first pipeline ≥ 80%. NPS ≥ 40 from beta survey. ≥ 1 paying Pro subscriber from the beta cohort. |
 
 
@@ -1606,12 +1606,12 @@ DataMind's positioning: the only tool that takes a raw, messy file from an SMB o
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
 | Phase 1 scope slips (now larger: domain, multi-file/Parquet, HITL, dual UI, configurable LLM, type-routing) | Medium–High | High | Buffer days built in. Scope-cut order pre-agreed: (1) drop Parquet input → (2) drop two domains → (3) drop second LLM provider → (4) drop JSON → (5) drop XLSX. HITL, dual UI, and type-routing are non-negotiable. |
-| Large files (> 100 MB) cause agent OOM or timeout | Medium | Medium | Phase 1 enforces 50 MB-per-file / 250 MB-per-upload cap. Phase 2 introduces chunking. Fargate task memory sized 2× expected. |
+| Large files (> 100 MB) cause agent OOM or timeout | Medium | Medium | Phase 1 enforces 50 MB-per-file / 250 MB-per-upload cap. Phase 2 introduces chunking. Docker (containerised) task memory sized 2× expected. |
 | Multi-file merge inference is wrong, surfacing bad join keys at HITL #1 | Medium | Medium | User is the final arbiter — a wrong proposal becomes a manual override, not a silent failure. Cartesian-explosion warning gates risky joins. Internal benchmark covers 5 multi-file shapes. |
 | LLM provider abstraction leaks provider-specific quirks (response schemas, function-call formats) | Medium | Medium | LiteLLM-compatible adapter layer normalises responses; Pydantic schemas validate every response regardless of provider. Per-provider regression tests in CI. |
 | DuckDB cannot handle expected query patterns at scale | Low | Medium | DuckDB is well-proven for the planned data sizes. Phase 2 migrates to Athena, the documented escape hatch. |
 | Postgres + Weaviate cannot scale embedding store beyond a few thousand datasets | Low | Low | Sufficient for Phase 1 + 2. Pinecone migration has a known path. |
-| S3 or AWS region outage | Low | High | Phase 2: multi-AZ Postgres. Status page from day one. Pipeline queue retains failed jobs for replay. |
+| Supabase region outage | Low | High | Phase 2: multi-AZ Postgres. Status page from day one. Pipeline queue retains failed jobs for replay. |
 | Stripe webhook outage / delayed delivery | Low | Medium | Stripe retries + idempotency on event_id. UI shows 'subscription processing' state for ≤ 60s rather than blocking access. Manual reconciliation runbook documented. |
 
 
@@ -1644,7 +1644,7 @@ DataMind's positioning: the only tool that takes a raw, messy file from an SMB o
 
 - LLM provider availability (configurable; Phase 1 uses Mistral + Moonshot Kimi). The configurable abstraction (F11) is the primary mitigation against single-vendor risk.
 - Stripe (P2): payment processing, hosted Checkout, hosted Customer Portal, webhook delivery.
-- AWS regional availability for the chosen primary region (us-east-1).
+- Supabase regional availability.
 - Open-source library health: Pandas, PyArrow, DuckDB, Weaviate, LangGraph, LiteLLM, Vega-Lite, Recharts, FastAPI.
 - GitHub availability (CI/CD).
 
@@ -1666,7 +1666,7 @@ Items that need resolution before they become blocking. Each has an owner and a 
 | --- | --- | --- | --- | --- |
 | OQ-01 | Final order of the Phase 1 scope-cut sequence (per Section 5 callout)? | Product | By 12 May | Proposed: drop Parquet → drop two domains → drop second LLM → drop JSON → drop XLSX. HITL, dual UI, type-routing non-negotiable. |
 | OQ-02 | Which four domains ship full prompt packs in P1, and in what order? | Product + Domain SMEs | By 12 May | Proposed: Finance and Retail first (highest demand signal), Healthcare and Marketing in week 2. |
-| OQ-03 | Which is the second LLM provider for P1 (Moonshot Kimi assumed)? | Engineering + Procurement | By 12 May | Moonshot Kimi is the default assumption. Confirm pricing terms; alternative is Bedrock if AWS volume discount applies. |
+| OQ-03 | Which is the second LLM provider for P1 (Moonshot Kimi assumed)? | Engineering + Procurement | By 12 May | Moonshot Kimi is the default assumption. Confirm pricing terms; alternative is Groq if pricing optimisation required. |
 | OQ-04 | Default per-agent model routing — which agents get the cheaper model? | Engineering | By 12 May | Proposed: Profiling + Cleaning Plan on cheap model; Intent + Insights on premium. Validate against acceptance metrics. |
 | OQ-05 | Embedding model for Weaviate — provider's default or a single neutral choice? | Engineering + AI | By 12 May | Per-provider default is simpler but mixes vector spaces if a tenant switches providers. A neutral choice (e.g., bge-small) avoids re-embedding on swap. |
 | OQ-06 | Should the audit log be append-only / WORM from day one, or in Phase 2? | Legal + Product | By 12 May | Phase 1 'immutable by convention' may suffice for internal beta; WORM is a real cost. |
