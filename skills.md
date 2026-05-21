@@ -286,7 +286,7 @@ def cleaning_plan_node(state: PipelineState) -> PipelineState:
     plan = cleaning_plan_agent.generate(state.dataset_id)
     state.cleaning_plan = plan
     state.status = PipelineStatus.AWAITING_HITL_CLEANING
-    # Persist state to Postgres + S3 before pausing
+    # Persist state to Supabase Database + Supabase Storage before pausing
     persist_pipeline_state(state)
     return state
 
@@ -304,7 +304,7 @@ def cleaning_execute_node(state: PipelineState) -> PipelineState:
     return state
 ```
 
-**Key rule**: HITL-paused state must be durably persisted to Postgres + S3 before the worker releases. A worker crash must not require re-running upstream agents.
+**Key rule**: HITL-paused state must be durably persisted to Supabase Database + Supabase Storage before the worker releases. A worker crash must not require re-running upstream agents.
 
 ---
 
@@ -354,8 +354,8 @@ def route_columns(df: pd.DataFrame) -> dict[str, ColumnClass]:
     return {col: classify_column(df[col]) for col in df.columns}
 ```
 
-- `NUMERIC_STRUCTURED` → write to Postgres table (typed) + Parquet column
-- `TEXTUAL_SEMANTIC` → embed with tenant's embedding model → store in pgvector
+- `NUMERIC_STRUCTURED` → write to Supabase Database table (typed) + Parquet column
+- `TEXTUAL_SEMANTIC` → embed with tenant's embedding model → store in Weaviate (HNSW index, per-tenant collection namespace)
 - `AMBIGUOUS` → present to user at HITL #1; honour their choice
 
 ---
@@ -394,7 +394,7 @@ class LLMClient:
             raise LLMSchemaValidationFailed(agent=agent_name, provider=provider)
 
     async def _call_provider(self, provider: str, model: str, prompt: str) -> str:
-        # Route to Anthropic / OpenAI / Gemini / etc. via LiteLLM-compatible call
+        # Route to Mistral / Moonshot Kimi (P1) or Gemini Flash / Groq / Ollama (P2) via LiteLLM-compatible call
         ...
 ```
 
@@ -468,10 +468,10 @@ def validate_readonly_sql(sql: str, allowed_table: str) -> None:
 
 Full setup sequence for a DataMind-style platform:
 
-1. `db-architect` → design 4-layer storage schema: users, datasets, pipeline_runs, hitl_decisions, llm_provider_config, pgvector tables
+1. `db-architect` → design 4-layer storage schema: users, datasets, pipeline_runs, hitl_decisions, llm_provider_config; Supabase Database + Weaviate collections
 2. `backend-builder` → FastAPI with RBAC middleware, async job dispatch, LangGraph supervisor
 3. `/guardrail-pipeline datamind ["user","admin"] ["datasets","hitl_decisions","audit_events"]`
 4. `frontend-builder` → Next.js dual UI (`/app/*` and `/admin/*`) with domain-aware components
-5. `api-integrator` → LiteLLM-compatible provider abstraction for Anthropic + OpenAI
-6. `deployer` → AWS ECS + RDS + S3 via Terraform; GitHub Actions CI/CD
+5. `api-integrator` → LiteLLM-compatible provider abstraction for Mistral + Moonshot Kimi (P1); API keys from Supabase Vault
+6. `deployer` → Docker Compose / Render + Supabase Storage + GHCR via Terraform; GitHub Actions CI/CD
 7. `security-auditor` → RBAC isolation tests, JWT role claim handling, prompt injection audit

@@ -35,7 +35,7 @@ All API errors follow a consistent JSON envelope. Pipeline errors have a structu
 | 422 | `UNPROCESSABLE_ENTITY` | Structurally valid request but semantically invalid (e.g., incompatible merge key) |
 | 429 | `RATE_LIMIT_EXCEEDED` | > 100 req/min per user or > 5 concurrent pipelines |
 | 500 | `INTERNAL_ERROR` | Unhandled server exception; always logged with `request_id` |
-| 503 | `SERVICE_UNAVAILABLE` | LLM provider down, S3 unreachable, or agent worker offline |
+| 503 | `SERVICE_UNAVAILABLE` | LLM provider down, Supabase Storage unreachable, or agent worker offline |
 
 ---
 
@@ -64,10 +64,10 @@ All API errors follow a consistent JSON envelope. Pipeline errors have a structu
 | `UPLOAD_FORMAT_UNSUPPORTED` | 400 | Format "{ext}" is not supported. Accepted: CSV, XLSX, JSON, Parquet. | Convert to a supported format |
 | `UPLOAD_FILE_EMPTY` | 400 | File "{filename}" has zero bytes. | Provide a non-empty file |
 | `UPLOAD_ENCODING_INVALID` | 422 | Could not detect encoding for "{filename}". | Re-save as UTF-8 |
-| `UPLOAD_PRESIGNED_URL_EXPIRED` | 400 | The presigned S3 URL has expired. Please request a new one. | Retry the upload-url endpoint |
+| `UPLOAD_PRESIGNED_URL_EXPIRED` | 400 | The presigned Supabase Storage URL has expired. Please request a new one. | Retry the upload-url endpoint |
 | `UPLOAD_PARQUET_SCHEMA_MISMATCH` | 422 | Parquet files in this upload have incompatible schemas. | Review column differences in HITL #1 |
 | `UPLOAD_XLSX_MULTI_SHEET` | 422 | XLSX file "{filename}" has multiple sheets. Please select one to proceed. | User prompted to pick a sheet in HITL #1 |
-| `UPLOAD_S3_WRITE_FAILED` | 503 | Could not write file to raw storage. Please retry. | Transient S3 issue; retry with backoff |
+| `UPLOAD_STORAGE_WRITE_FAILED` | 503 | Could not write file to raw storage. Please retry. | Transient Supabase Storage issue; retry with backoff |
 
 ---
 
@@ -120,7 +120,7 @@ All API errors follow a consistent JSON envelope. Pipeline errors have a structu
 | `LLM_CONTEXT_WINDOW_EXCEEDED` | 422 | The dataset profile is too large to fit in the LLM context window. | Reduce file size or number of columns |
 | `LLM_COST_CEILING_HIT` | 503 | Pipeline cost ceiling reached. LLM calls halted. | Admin can adjust cost ceiling; split the dataset |
 | `LLM_PROVIDER_CONFIG_MISSING` | 500 | No LLM provider is configured for this tenant. | Admin must configure a provider in Admin UI → LLM Config |
-| `LLM_SECRETS_FETCH_FAILED` | 500 | Could not retrieve API key from Secrets Manager. | Check IAM role permissions; contact support |
+| `LLM_SECRETS_FETCH_FAILED` | 500 | Could not retrieve API key from Supabase Vault. | Check Vault access permissions; contact support |
 
 ---
 
@@ -142,12 +142,12 @@ All API errors follow a consistent JSON envelope. Pipeline errors have a structu
 
 | Code | HTTP | Message | Resolution |
 |---|---|---|---|
-| `STORAGE_RAW_READ_FAILED` | 503 | Could not read raw file from S3. Please retry. | Transient S3 issue |
-| `STORAGE_CURATED_WRITE_FAILED` | 503 | Could not write curated Parquet to S3. | Transient S3 issue; pipeline will retry automatically (up to 3 attempts) |
+| `STORAGE_RAW_READ_FAILED` | 503 | Could not read raw file from Supabase Storage. Please retry. | Transient Supabase Storage issue |
+| `STORAGE_CURATED_WRITE_FAILED` | 503 | Could not write curated Parquet to Supabase Storage. | Transient issue; pipeline will retry automatically (up to 3 attempts) |
 | `STORAGE_PARQUET_CORRUPT` | 422 | Curated Parquet file for dataset {dataset_id} version {v} is corrupt. | Re-run cleaning from raw |
 | `STORAGE_QUOTA_EXCEEDED` | 429 | Storage quota exceeded (5GB limit in Phase 1). Please delete old datasets. | Clean up old datasets; quota raised in Phase 2 plans |
 | `STORAGE_DUCKDB_QUERY_FAILED` | 500 | DuckDB query execution failed: {detail}. | Report with dataset_id and intent_id |
-| `STORAGE_PGVECTOR_UPSERT_FAILED` | 503 | Failed to write embeddings to pgvector. | Transient DB issue; retry |
+| `STORAGE_WEAVIATE_UPSERT_FAILED` | 503 | Failed to write embeddings to Weaviate. | Transient Weaviate issue; retry |
 
 ---
 
@@ -158,7 +158,7 @@ All API errors follow a consistent JSON envelope. Pipeline errors have a structu
 | `ADMIN_LAST_ADMIN_GUARD` | 409 | Cannot demote or delete the last admin in this tenant. | Promote another user to admin first |
 | `ADMIN_USER_NOT_FOUND` | 404 | User {user_id} not found in this tenant. | Verify user_id |
 | `ADMIN_DOMAIN_PACK_NOT_FOUND` | 404 | Domain pack "{domain}" does not exist. | List available packs via GET /admin/domain-packs |
-| `ADMIN_LLM_CONFIG_INVALID` | 400 | Per-agent override specifies an unsupported provider "{provider}". | Use a supported provider (anthropic, openai in P1) |
+| `ADMIN_LLM_CONFIG_INVALID` | 400 | Per-agent override specifies an unsupported provider "{provider}". | Use a supported provider (mistral, kimi in P1) |
 
 ---
 
@@ -195,7 +195,7 @@ dashboard_generating ──── error (DASHBOARD_*) ────────�
 ready  ✓
 ```
 
-- **Paused states** (`awaiting_hitl_*`) persist full LangGraph state to Postgres + S3. A worker crash does not lose user decisions.
+- **Paused states** (`awaiting_hitl_*`) persist full LangGraph state to Supabase Database + Supabase Storage. A worker crash does not lose user decisions.
 - **Failed state** always produces a partial audit log up to the failure point.
 - **Retry**: failed pipelines are retryable via `POST /jobs/{id}/retry` (3 attempts with exponential backoff: 2s, 8s, 32s).
 
@@ -205,10 +205,10 @@ ready  ✓
 
 | Failure Type | Auto-retry | Max Attempts | Backoff |
 |---|---|---|---|
-| S3 read/write transient | Yes | 3 | Exponential (2s, 8s, 32s) |
+| Supabase Storage read/write transient | Yes | 3 | Exponential (2s, 8s, 32s) |
 | LLM schema validation failure | Yes | 3 | Immediate |
 | LLM rate limit | Yes (P2 failover) | 1 + failover | After `retry_after` |
-| Postgres transient | Yes | 3 | Exponential |
+| Supabase Database transient | Yes | 3 | Exponential |
 | HITL decision timeout | No auto-execute in P1 | n/a | User must return and submit |
 | Pipeline manual retry | User-initiated | 3 total | Manual |
 
@@ -228,17 +228,17 @@ Every error emitted in a pipeline step is logged with:
   "run_id": "...",
   "agent_name": "cleaning_plan",
   "error_code": "CLEAN_PLAN_GENERATION_FAILED",
-  "provider": "anthropic",
-  "model": "claude-sonnet-4-6",
+  "provider": "mistral",
+  "model": "mistral-small-latest",
   "retry_attempt": 3,
-  "timestamp": "2026-05-14T10:00:00Z"
+  "timestamp": "2026-05-21T10:00:00Z"
 }
 ```
 
 Alerts fire when:
 - Job failure rate > 5% over 15 minutes → Page
 - LLM error rate > 10% over 15 minutes (any provider) → Page
-- S3 write failure → Page
+- Supabase Storage write failure → Page
 
 ---
 

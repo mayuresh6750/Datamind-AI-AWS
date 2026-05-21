@@ -247,3 +247,60 @@ Keep prompts raw so the intent-to-outcome chain is traceable. Do not paraphrase 
 - [PRD.md](PRD.md) — Same replacements applied to the markdown mirror
 - [DataMind_AI_PRD_original_backup.docx](DataMind_AI_PRD_original_backup.docx) — Original preserved as backup
 - [update_prd.py](update_prd.py) — Script used to make the docx changes
+
+---
+
+## Session 5 — 2026-05-21
+
+### Prompt 1 — Consolidated: Full Tech-Stack Revision Across All Project Documents (Phase 1)
+
+**Better consolidated prompt** *(covers everything given today in one clear instruction)*:
+
+> We are revising the DataMind AI tech stack for Phase 1. Please make the following three changes everywhere they appear across ALL project documents — `DataMind_AI_PRD.docx`, `PRD.md`, `architecture.md`, `claude.md`, `memory.md`, `errors.md`, `plan.md`, and `planphase.md`. Apply changes to Phase 1 content only; preserve Phase 2 references where noted.
+>
+> **Change 1 — Replace all AWS with Supabase equivalents:**
+> - AWS S3 (Layer 1 raw storage) → Supabase Storage (versioned bucket, per-user prefix)
+> - AWS S3 (Layer 2 curated Parquet) → Supabase Storage (curated bucket)
+> - AWS RDS / PostgreSQL (RDS) → Supabase Database (PostgreSQL)
+> - AWS Secrets Manager → Supabase Vault
+> - AWS SQS + Fargate (Phase 2 job queue) → Redis Streams + Celery workers
+> - AWS ECS / Fargate (deployment) → Docker Compose / Render
+> - AWS ECR (container registry) → GitHub Container Registry (GHCR)
+> - AWS X-Ray → Grafana Tempo (Phase 2 tracing)
+> - AWS Athena (Phase 2 query) → DuckDB (scaled, in-process on Supabase Storage)
+> - CloudWatch (logs/metrics/alerts) → Prometheus + Grafana
+> - Terraform state: S3 + DynamoDB lock → Supabase Storage + PostgreSQL lock
+> - Encryption: SSE-S3 / SSE-KMS → AES-256 (Supabase managed)
+> - Verify zero AWS references remain in every file after changes.
+>
+> **Change 2 — Replace pgvector with Weaviate for Layer 4 (textual/semantic):**
+> - pgvector on PostgreSQL → Weaviate (HNSW index, cosine similarity)
+> - Update all references: storage table, agent tools, analysis agent, column routing logic, error codes, sprint tasks, acceptance checklist.
+> - Reason: Weaviate is open-source, self-hostable for local dev, supports hybrid search natively — preferred over Pinecone.
+>
+> **Change 3 — Replace paid LLM providers with free-tier models:**
+> - Phase 1 providers: Anthropic Claude + OpenAI → Mistral (mistral-small, mistral-7b-instruct) + Moonshot Kimi (kimi-k2, moonshot-v1)
+> - Phase 2 provider expansion: Azure OpenAI + AWS Bedrock → Google Gemini Flash + Groq (Llama 3); keep Ollama (self-hosted)
+> - Update LLM abstraction section, admin error codes (supported provider list), sprint tasks, acceptance checklist, scope cut order, and open questions accordingly.
+> - Update error log examples (provider/model fields) to reflect Mistral.
+>
+> After all changes, do not push to git — I will do that myself.
+
+**What was actually requested (original prompts today in order)**:
+1. Update `DataMind_AI_PRD.docx`: replace AWS with Supabase, pgvector with Weaviate/Pinecone, LLMs with free models (Kimi, Mistral)
+2. Clarification: confirmed Layer 3 (Postgres/SQL) is already Supabase — no change needed there
+3. Spotted remaining AWS Athena reference on page 40 of PRD — fixed that and all other missed AWS references (ECR, ECS, X-Ray, CloudWatch, Terraform state, risk table, open questions)
+4. Revise `architecture.md`, `claude.md`, `memory.md` per updated PRD — same stack changes applied throughout
+5. Revise `errors.md`, `plan.md`, `planphase.md` per updated files — Phase 1 only — no git push
+
+**Files modified today**:
+- [DataMind_AI_PRD.docx](DataMind_AI_PRD.docx) — Full stack revision; 0 AWS references remain
+- [PRD.md](PRD.md) — Same revision applied to markdown mirror
+- [architecture.md](architecture.md) — Fully revised to new stack
+- [claude.md](claude.md) — Fully revised to new stack
+- [memory.md](memory.md) — Fully revised to new stack; ADRs updated
+- [errors.md](errors.md) — Error codes, retry table, observability example updated
+- [plan.md](plan.md) — Tech stack table, architecture diagram, timeline, scope cut updated
+- [planphase.md](planphase.md) — All feature specs, sprint tasks, acceptance checklist updated
+- [DataMind_AI_PRD_original_backup.docx](DataMind_AI_PRD_original_backup.docx) — Original PRD preserved
+- [update_prd.py](update_prd.py) — Script used for docx transformation

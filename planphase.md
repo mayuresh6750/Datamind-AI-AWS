@@ -63,7 +63,7 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 - Single or multiple files per upload (max 10 files in Phase 1)
 - All files in one upload must be the same format; mixing returns a clear error
 - File size cap: 50MB per file, 250MB total per upload
-- Frontend requests presigned S3 URLs; uploads directly to Layer 1 (raw bucket)
+- Frontend requests presigned Supabase Storage URLs; uploads directly to Layer 1 (raw bucket)
 - Job ID returned within 2 seconds; format detection completes within 15 seconds
 
 **Acceptance criteria:**
@@ -114,25 +114,25 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 
 | Layer | Technology | Purpose |
 |---|---|---|
-| Layer 1 — Raw | AWS S3 (versioned, per-user prefix) | Immutable source of truth; original files preserved |
-| Layer 2 — Curated | AWS S3 (Apache Parquet) | Cleaned, queryable columnar data |
-| Layer 3 — Numeric/Structured | Postgres + DuckDB (in-process) | SQL queries over numeric, boolean, datetime, categorical columns |
-| Layer 4 — Textual/Vector | pgvector on Postgres | Embeddings for free-text columns; semantic search |
-| Metadata | PostgreSQL (AWS RDS, single-AZ) | Users, roles, datasets, pipeline runs, HITL decisions, audit, usage meters |
+| Layer 1 — Raw | Supabase Storage (versioned bucket, per-user prefix) | Immutable source of truth; original files preserved |
+| Layer 2 — Curated | Supabase Storage (Apache Parquet) | Cleaned, queryable columnar data; versioned per cleaning run |
+| Layer 3 — Numeric/Structured | Supabase Database (PostgreSQL) + DuckDB (in-process) | SQL queries over numeric, boolean, datetime, categorical columns |
+| Layer 4 — Textual/Vector | Weaviate | Vector embeddings for free-text columns; semantic search via HNSW index |
+| Metadata | Supabase Database (PostgreSQL, single-AZ) | Users, roles, datasets, pipeline runs, HITL decisions, audit, usage meters |
 
 **Column classification rules:**
 
 | Class | Detection Rule | Storage |
 |---|---|---|
-| Numeric / structured | dtype is int/float/bool/date; or string that parses cleanly; or low-cardinality categorical (≤ 50 distinct values) | Postgres + Parquet |
-| Textual / semantic | dtype is string with avg length > 40 chars or distinct count > 50% of rows | pgvector + Parquet |
+| Numeric / structured | dtype is int/float/bool/date; or string that parses cleanly; or low-cardinality categorical (≤ 50 distinct values) | Supabase Database + Parquet |
+| Textual / semantic | dtype is string with avg length > 40 chars or distinct count > 50% of rows | Weaviate + Parquet |
 | Ambiguous | Does not fit above cleanly | Surfaced in HITL #1 for user decision |
 
 **Acceptance criteria:**
-- Raw files never modified; preserved in S3 with versioning
-- Every cleaned dataset written to curated Parquet
-- Numeric columns queryable via SQL (Postgres/DuckDB)
-- Text columns embedded and queryable via pgvector
+- Raw files never modified; preserved in Supabase Storage with versioning
+- Every cleaned dataset written to curated Parquet in Supabase Storage
+- Numeric columns queryable via SQL (Supabase Database/DuckDB)
+- Text columns embedded and queryable via Weaviate semantic search
 - All decisions reproducible from raw layer
 
 ---
@@ -194,9 +194,9 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 
 **What ships:**
 - Cleaning Executor runs only approved steps
-- Each step writes to curated Parquet (Layer 2)
-- Numeric/structured columns loaded into Postgres/DuckDB (Layer 3)
-- Textual columns embedded and loaded into pgvector (Layer 4)
+- Each step writes to curated Parquet (Layer 2) in Supabase Storage
+- Numeric/structured columns loaded into Supabase Database/DuckDB (Layer 3)
+- Textual columns embedded and loaded into Weaviate (Layer 4)
 - Full audit log entry per step: who approved, when, which provider/model, what changed
 
 **Acceptance criteria:**
@@ -210,14 +210,14 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 
 **What ships:**
 - All agent LLM calls go through a LiteLLM-compatible abstraction layer
-- Phase 1 providers: Anthropic Claude + OpenAI
-- Admin can configure: provider, model, per-agent routing (e.g., cheap model for profiling, premium for insights)
-- Provider API keys stored in AWS Secrets Manager; never in env files or repo
+- Phase 1 providers: Mistral (mistral-small, mistral-7b-instruct) + Moonshot Kimi (kimi-k2, moonshot-v1)
+- Admin can configure: provider, model, per-agent routing (e.g., lighter model for profiling, capable model for insights)
+- Provider API keys stored in Supabase Vault; never in env files or repo
 - Structured JSON output enforced: invalid outputs trigger retry, then escalation
 - Every LLM call records: tokens used, cost, wall-clock latency, attributed to user + tenant + agent + pipeline
 
 **Acceptance criteria:**
-- Pipeline runs end-to-end on both Anthropic Claude and OpenAI without code changes
+- Pipeline runs end-to-end on both Mistral and Moonshot Kimi without code changes
 - Per-agent model routing configurable from Admin UI
 - Cost and latency tracked per call
 
@@ -253,14 +253,14 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 ### F6 — Analysis Agent (SQL + Semantic)
 
 **What ships:**
-- SQL queries on Postgres/DuckDB for numeric, datetime, and categorical questions
-- Semantic search on pgvector for textual/free-form questions
+- SQL queries on Supabase Database/DuckDB for numeric, datetime, and categorical questions
+- Semantic search on Weaviate for textual/free-form questions
 - Combined queries when question spans both data types
 - SQL validated as read-only before execution; DDL and write operations blocked
 
 **Acceptance criteria:**
 - Numeric questions answered via SQL
-- Textual questions answered via semantic search
+- Textual questions answered via Weaviate semantic search
 - No write operations permitted on curated layer
 - Analysis results passed to Dashboard Agent as structured output
 
@@ -298,7 +298,7 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 ### F9 — Auth, RBAC, and Dual UI
 
 **What ships:**
-- Email + password authentication; JWT tokens
+- Email + password authentication; JWT tokens (HS256, 1-hour expiry, refresh tokens)
 - Two roles in Phase 1: **user** and **admin**
 - RBAC enforced server-side via FastAPI middleware on every endpoint
 - Frontend hides admin routes from non-admins but never trusts frontend alone
@@ -333,16 +333,17 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 ### F10 — Operational Essentials
 
 **What ships:**
-- CI/CD: GitHub Actions pipeline — lint, type-check, unit tests, image build, deploy to staging and prod on merge
-- Structured JSON logging to CloudWatch
-- Basic CloudWatch dashboards for key metrics
-- Email alerting on error thresholds
+- CI/CD: GitHub Actions pipeline — lint, type-check, unit tests, image build, push to GHCR, deploy to staging and prod on merge
+- Structured JSON logging (structlog) with Prometheus metrics endpoint
+- Prometheus + Grafana dashboards for key pipeline and error metrics
+- Email alerting via Grafana alert rules on error thresholds
 - Celery + Redis for async job queue
-- Pipeline state persisted to S3 + Postgres after every agent step (supports resume after HITL pause or failure)
+- Pipeline state persisted to Supabase Database + Supabase Storage after every agent step (supports resume after HITL pause or failure)
+- Provider API keys and signing secrets stored in Supabase Vault
 
 **Acceptance criteria:**
 - Every merge to main triggers full CI pipeline
-- Logs are structured JSON queryable in CloudWatch
+- Logs are structured JSON; metrics queryable in Grafana
 - Failed pipeline can be resumed from last completed agent step without re-running upstream
 
 ---
@@ -366,8 +367,9 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 | Task | Owner Area |
 |---|---|
 | Git repo, branch strategy, PR templates | Eng |
-| GitHub Actions: lint, type-check, test, build | DevOps |
-| AWS infra: S3 buckets (raw + curated), RDS Postgres, Redis | Infra |
+| GitHub Actions: lint, type-check, test, build, push to GHCR | DevOps |
+| Supabase project setup: Storage buckets (raw + curated), Database schema, Vault | Infra |
+| Redis + Celery worker setup | Infra |
 | FastAPI project structure, Pydantic v2 models | Backend |
 | JWT auth + RBAC middleware | Backend |
 | DB schema: users, roles, datasets, pipeline_runs, hitl_decisions, audit_log | Backend |
@@ -378,11 +380,11 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 
 | Task | Owner Area |
 |---|---|
-| File upload UI (drag-and-drop, presigned S3 URLs) | Frontend |
+| File upload UI (drag-and-drop, presigned Supabase Storage URLs) | Frontend |
 | Ingestion Agent: format detection, parsing (CSV, XLSX, JSON, Parquet) | Backend/AI |
 | Multi-file merge plan generation (union vs join) | Backend/AI |
 | Column type classification (numeric / textual / ambiguous) | Backend/AI |
-| Domain Agent: prompt pack loader, Postgres lookup | Backend/AI |
+| Domain Agent: prompt pack loader, Supabase Database lookup | Backend/AI |
 | 4 domain prompt packs (Finance, Healthcare, Retail, Marketing) + generic | Backend/AI |
 | Domain selection screen (first-run modal) | Frontend |
 
@@ -406,10 +408,10 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 | Step-level approve / modify / reject interactions | Frontend |
 | HITL #2 API endpoint + audit log write | Backend |
 | Cleaning Executor: run approved steps only | Backend/AI |
-| Write cleaned data to curated Parquet (Layer 2) | Backend |
-| Load numeric columns into Postgres/DuckDB (Layer 3) | Backend |
-| Embed textual columns into pgvector (Layer 4) | Backend |
-| Pipeline state persistence (S3 + Postgres after each step) | Backend |
+| Write cleaned data to curated Parquet in Supabase Storage (Layer 2) | Backend |
+| Load numeric columns into Supabase Database/DuckDB (Layer 3) | Backend |
+| Embed textual columns into Weaviate (Layer 4) | Backend |
+| Pipeline state persistence (Supabase Database + Supabase Storage after each step) | Backend |
 
 ### Sprint 5 — Days 21–25: Intent + Dashboard + Insights
 
@@ -418,12 +420,12 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 | Intent capture screen + domain suggestion chips | Frontend |
 | Intent Agent: parse free-text → structured analysis spec | Backend/AI |
 | HITL #3: lightweight intent confirmation (show restated interpretation) | Frontend/Backend |
-| Analysis Agent: SQL builder + DuckDB runner | Backend/AI |
-| Analysis Agent: pgvector semantic search | Backend/AI |
+| Analysis Agent: SQL builder + DuckDB runner (numeric) | Backend/AI |
+| Analysis Agent: Weaviate semantic search (textual) | Backend/AI |
 | Dashboard Agent: Vega-Lite spec generation (2–3 KPIs + 2 charts) | Backend/AI |
 | Dashboard render in User UI (Recharts / Vega-Lite embed) | Frontend |
 | Insights Agent: domain-flavoured narrative + recommended action | Backend/AI |
-| LLM provider abstraction layer (LiteLLM-compatible, Claude + OpenAI) | Backend/AI |
+| LLM provider abstraction layer (LiteLLM-compatible, Mistral + Moonshot Kimi) | Backend/AI |
 
 ### Sprint 6 — Days 26–30: Admin UI + QA + Hardening
 
@@ -433,8 +435,8 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 | Admin UI: LLM provider config (provider, model, per-agent routing) | Frontend/Backend |
 | Admin UI: domain pack viewer (read-only) | Frontend |
 | Admin UI: system health, audit log viewer, usage meter | Frontend/Backend |
-| AWS Secrets Manager integration for API keys | Backend/Infra |
-| Structured JSON logging → CloudWatch, alerting | Infra |
+| Supabase Vault integration for LLM API keys | Backend/Infra |
+| Prometheus metrics endpoint + Grafana dashboards + alerting | Infra |
 | End-to-end pipeline testing (all 4 domains, multi-file, multi-provider) | QA |
 | Performance testing: 50MB files, p95 dashboard latency < 90s | QA |
 | Security: RBAC enforcement testing (403s for non-admin routes) | QA |
@@ -450,7 +452,7 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 - [ ] Cleaning plan generated with numbered steps, rationale, and confidence scores
 - [ ] HITL #2 screen allows step-level approve / modify / reject; nothing runs before submit
 - [ ] Only approved cleaning steps execute; raw data never modified
-- [ ] Cleaned data written to curated Parquet; numeric → Postgres/DuckDB; textual → pgvector
+- [ ] Cleaned data written to curated Parquet in Supabase Storage; numeric → Supabase Database/DuckDB; textual → Weaviate
 - [ ] Intent capture with domain suggestion chips; intent parsed into structured spec
 - [ ] Dashboard renders (2–3 KPI cards + 2 charts) within 60s of intent submission
 - [ ] Insights narrative generated with domain vocabulary
@@ -458,9 +460,9 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 - [ ] Pipeline reproducible from raw layer (100%)
 - [ ] Admin UI: all 6 screens functional; LLM config admin-controlled
 - [ ] RBAC: admin routes return 403 for non-admin users (server-side enforced)
-- [ ] Pipeline runs end-to-end on Anthropic Claude and OpenAI without code changes
-- [ ] CI/CD: lint, type-check, tests pass on every merge to main
-- [ ] CloudWatch logging and alerting live
+- [ ] Pipeline runs end-to-end on Mistral and Moonshot Kimi without code changes
+- [ ] CI/CD: lint, type-check, tests pass on every merge to main; images pushed to GHCR
+- [ ] Prometheus metrics and Grafana alerting live
 - [ ] Cost per pipeline ≤ $0.30 verified in test runs
 
 ---
@@ -481,10 +483,10 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 | Domain prompt pack editor (read-only in P1) | Phase 2 |
 | Webhook events, public REST API | Phase 2 |
 | Scheduled pipeline refresh | Phase 2 |
-| Google Gemini, Azure OpenAI, AWS Bedrock, Ollama | Phase 2 |
+| Google Gemini Flash, Groq (Llama 3), Ollama | Phase 2 |
 | Dashboard drill-down, export to PDF/PNG | Phase 2 |
 | Iterative Q&A on same dataset | Phase 2 |
-| OpenTelemetry tracing | Phase 2 |
+| OpenTelemetry tracing → Grafana Tempo | Phase 2 |
 | Mobile app, on-prem deployment | Permanently out of scope |
 | Real-time / streaming ingestion | Permanently out of scope |
 | Training custom ML models on user data | Permanently out of scope |
