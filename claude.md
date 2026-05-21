@@ -52,27 +52,30 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 | Frontend - Admin UI | Next.js (route group /admin/*), RBAC-gated |
 | API Gateway | Python 3.11+, FastAPI, Pydantic v2, JWT auth |
 | Agent Orchestration | LangGraph (supervisor pattern), Pydantic-validated outputs |
-| LLM Provider Layer | LiteLLM-compatible abstraction; Anthropic Claude + OpenAI (Phase 1) |
-| Raw Storage (Layer 1) | AWS S3 (versioned bucket, per-user prefix) |
-| Curated Storage (Layer 2) | AWS S3, Apache Parquet format |
-| Numeric/Structured (Layer 3) | PostgreSQL + DuckDB |
-| Textual/Vector (Layer 4) | pgvector on PostgreSQL |
-| Metadata Store | PostgreSQL (AWS RDS) |
-| Job Queue | Celery + Redis (Phase 1); AWS SQS + Fargate (Phase 2) |
+| LLM Provider Layer | LiteLLM-compatible abstraction; Mistral + Moonshot Kimi (Phase 1) |
+| Raw Storage (Layer 1) | Supabase Storage (versioned bucket, per-user prefix) |
+| Curated Storage (Layer 2) | Supabase Storage, Apache Parquet format |
+| Numeric/Structured (Layer 3) | Supabase Database (PostgreSQL) + DuckDB |
+| Textual/Vector (Layer 4) | Weaviate |
+| Metadata Store | Supabase Database (PostgreSQL) |
+| Job Queue | Celery + Redis (Phase 1); Redis Streams + Celery workers (Phase 2) |
+| Container Registry | GitHub Container Registry (GHCR) |
+| Secrets | Supabase Vault |
+| Observability | Prometheus + Grafana (metrics/alerts); Grafana Tempo (traces, P2) |
 
 ### Four-Layer Storage Architecture
 
-1. **Layer 1 (Raw)**: AWS S3 bucket with versioning — original files preserved unmodified
-2. **Layer 2 (Curated)**: AWS S3 bucket with cleaned data in Apache Parquet format
-3. **Layer 3 (Numeric/Structured)**: PostgreSQL for numeric, boolean, datetime, and low-cardinality categorical data
-4. **Layer 4 (Textual/Semantic)**: pgvector for embeddings of free-text columns
+1. **Layer 1 (Raw)**: Supabase Storage bucket with versioning — original files preserved unmodified
+2. **Layer 2 (Curated)**: Supabase Storage bucket with cleaned data in Apache Parquet format
+3. **Layer 3 (Numeric/Structured)**: Supabase Database (PostgreSQL) for numeric, boolean, datetime, and low-cardinality categorical data; DuckDB for fast in-process analytical queries
+4. **Layer 4 (Textual/Semantic)**: Weaviate for vector embeddings of free-text columns (HNSW index, cosine similarity)
 
 ### Data Type Classification Rules
 
 | Class | Detection Rule | Storage Path |
 |-------|----------------|--------------|
-| Numeric/Structured | int/float/bool/date dtype, or low-cardinality categorical (≤50 distinct values) | PostgreSQL + Parquet |
-| Textual/Semantic | String with avg length >40 chars or distinct count >50% of rows | pgvector + Parquet |
+| Numeric/Structured | int/float/bool/date dtype, or low-cardinality categorical (≤50 distinct values) | Supabase Database + Parquet |
+| Textual/Semantic | String with avg length >40 chars or distinct count >50% of rows | Weaviate + Parquet |
 | Ambiguous | Does not fit above rules | Surfaced in HITL #1 for user decision |
 
 ---
@@ -89,7 +92,7 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 | Cleaning Plan | Drafts numbered cleaning plan with rationale + confidence. Does NOT execute. | P1 |
 | Cleaning Executor | Executes only user-approved steps, logs each action | P1 |
 | Intent | Parses user's natural-language goal into structured analysis spec | P1 |
-| Analysis | Runs SQL on PostgreSQL/DuckDB for numeric; semantic search on pgvector for textual | P1 |
+| Analysis | Runs SQL on Supabase Database/DuckDB for numeric; semantic search on Weaviate for textual | P1 |
 | Dashboard | Converts analysis results into Vega-Lite specs | P1 |
 | Insights | Generates domain-flavored narrative + recommended next action | P1 |
 | Outlier (advanced) | Flags statistical outliers; recommends keep/clip/remove | P2 |
@@ -120,7 +123,7 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 ## Data Flow
 
 1. **Domain**: User picks domain; Domain Agent loads matching prompt pack
-2. **Upload**: User drags files into UI; files upload directly to Layer 1 (raw S3)
+2. **Upload**: User drags files into UI; files upload directly to Layer 1 (Supabase Storage)
 3. **Detect & Profile**: Ingestion Agent inspects files, classifies columns
 4. **HITL #1**: User confirms schema, merge plan, type-routing
 5. **Cleaning Plan**: Cleaning Agent generates numbered plan (no execution)
@@ -153,12 +156,12 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 
 ### F1c — Type-Aware Storage Routing
 - Automatic classification of columns
-- Routing to PostgreSQL/DuckDB or pgvector based on type
+- Routing to Supabase Database/DuckDB (numeric) or Weaviate (textual) based on type
 - Ambiguous columns flagged for user decision
 
 ### F2 — Two-Layer Storage
-- Layer 1: Original files preserved unmodified
-- Layer 2: Cleaned data in Apache Parquet
+- Layer 1: Original files preserved unmodified in Supabase Storage
+- Layer 2: Cleaned data in Apache Parquet on Supabase Storage
 
 ### F3 — HITL Cleaning
 - **Plan phase**: Agent generates numbered list of proposed actions
@@ -187,7 +190,7 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 
 ### F12 — Configurable LLM Provider
 - LiteLLM-compatible abstraction
-- Phase 1: Anthropic Claude + OpenAI
+- Phase 1: Mistral (mistral-small, mistral-7b-instruct) + Moonshot Kimi (kimi-k2, moonshot-v1)
 - Per-tenant defaults with per-agent overrides
 - Cost and latency tracking per provider/agent
 
@@ -196,7 +199,7 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 ## Phase 2 Additions
 
 - Advanced cleaning: fuzzy dedup, KNN imputation, LLM-assisted imputation, outlier handling
-- Additional LLM providers: Google Gemini, Azure OpenAI, AWS Bedrock, Ollama
+- Additional LLM providers: Google Gemini Flash, Groq (Llama 3), Ollama (self-hosted)
 - PII Detection Agent
 - Iterative Q&A on same dataset
 - Project/workspace organization
@@ -230,7 +233,7 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 | POST | /api/v1/auth/signup | Create account |
 | POST | /api/v1/auth/login | Issue JWT |
 | PATCH | /api/v1/me/domain | Update active domain |
-| POST | /api/v1/datasets/upload-url | Get presigned S3 URLs |
+| POST | /api/v1/datasets/upload-url | Get presigned Supabase Storage URLs |
 | POST | /api/v1/datasets/{id}/ingest | Trigger format detection |
 | GET | /api/v1/datasets/{id}/merge-plan | Get HITL #1 data |
 | POST | /api/v1/datasets/{id}/merge-plan/decision | Submit HITL #1 decision |
@@ -265,10 +268,10 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 - JWT authentication (HS256, 1-hour expiry, refresh tokens)
 - Argon2 password hashing
 - RBAC with two roles: user, admin
-- Per-user prefix isolation in S3
-- Encryption at rest: AES-256 (SSE-S3 in P1, SSE-KMS in P2)
+- Per-user prefix isolation in Supabase Storage
+- Encryption at rest: AES-256 (Supabase managed, P1 + P2)
 - Encryption in transit: TLS 1.3 minimum
-- Secrets in AWS Secrets Manager
+- Secrets in Supabase Vault
 - Input sanitization on all user-supplied strings
 - Stripe webhook signature verification (P2)
 
@@ -381,7 +384,7 @@ Each pack includes: domain vocabulary, common KPI definitions, sample-question l
 | Layer | Scope | Coverage Target |
 |-------|-------|-----------------|
 | Unit | Agent functions, transform logic, API handlers | ≥ 70% (P1), ≥ 85% (P2) |
-| Integration | Agent-to-agent, S3, DuckDB, pgvector | Happy paths + key errors |
+| Integration | Agent-to-agent, Supabase Storage, DuckDB, Weaviate | Happy paths + key errors |
 | E2E (single-file) | Upload → HITL #1 → HITL #2 → dashboard per format | All formats |
 | E2E (multi-file) | 2-file and 5-file uploads with union/join | Union + Join paths |
 | HITL Flow | All decision branches per gate | Complete |
@@ -405,7 +408,7 @@ Each pack includes: domain vocabulary, common KPI definitions, sample-question l
 
 | Week | Focus | Exit Criteria |
 |------|-------|---------------|
-| Week 1 | Foundation: AWS infra, CI/CD, Postgres schema, FastAPI, Next.js shell, auth, LLM abstraction | User can sign up, log in, hit /health. CI/CD deploys to staging. |
+| Week 1 | Foundation: Supabase setup + Terraform, CI/CD, Postgres schema, FastAPI, Next.js shell, auth, LLM abstraction | User can sign up, log in, hit /health. CI/CD deploys to staging. |
 | Week 2 | Domain selection, multi-file upload, format detection, HITL #1 | Domain persists. Multi-file upload works. HITL #1 renders. |
 | Week 3 | Parquet conversion, type-routing, cleaning plan agent, HITL #2, cleaning executor | Cleaning plan generated. ≥60% acceptance on golden datasets 1-5. |
 | Week 4 | Intent agent, analysis agent, dashboard agent, insights agent | End-to-end happy path for CSV and Parquet merge. |
@@ -416,9 +419,9 @@ Each pack includes: domain vocabulary, common KPI definitions, sample-question l
 | Week | Focus |
 |------|-------|
 | Week 6 | Advanced cleaning agents, PII detection, XML/PDF ingestion |
-| Week 7 | LLM provider expansion, domain pack editor, new domain packs |
+| Week 7 | LLM provider expansion (Gemini Flash, Groq, Ollama), domain pack editor, new domain packs |
 | Week 8 | Iterative Q&A, expanded charts, public REST API, project organization |
-| Week 9 | Stripe monetization, OpenTelemetry tracing, auto-scaling, Multi-AZ RDS |
+| Week 9 | Stripe monetization, OpenTelemetry tracing, auto-scaling Celery workers, Supabase Database Multi-AZ |
 | Week 10 | Closed beta launch (20-30 users), bug fixes, documentation |
 
 ### Scope Cut Priority (Phase 1)
@@ -501,7 +504,7 @@ If timeline slips, cut in this order:
 |-----------|----------|
 | Job failure rate > 5% over 15 min | Page |
 | API p95 latency > 2s for 5 min | Page |
-| S3 write failure | Page |
+| Supabase Storage write failure | Page |
 | LLM error rate > 10% over 15 min | Page |
 | HITL pause queue depth > 100 | Page |
 | Daily LLM spend > 130% of 7-day average | Email |
@@ -515,9 +518,9 @@ If timeline slips, cut in this order:
 |---|----------|-------|
 | OQ-01 | Final scope-cut sequence order | Product |
 | OQ-02 | Which four domains ship full prompt packs in P1 | Product + Domain SMEs |
-| OQ-03 | Second LLM provider confirmation (OpenAI vs Bedrock) | Engineering + Procurement |
-| OQ-04 | Default per-agent model routing | Engineering |
-| OQ-05 | Embedding model selection strategy | Engineering + AI |
+| OQ-03 | Second LLM provider confirmation (Mistral vs Moonshot Kimi default routing) | Engineering |
+| OQ-04 | Default per-agent model routing (cheaper model for profiling, capable for insights) | Engineering |
+| OQ-05 | Embedding model selection strategy for Weaviate | Engineering + AI |
 | OQ-06 | Audit log WORM requirement timing | Legal + Product |
 
 ---
@@ -529,7 +532,7 @@ If timeline slips, cut in this order:
 - [ ] HITL #1 + HITL #2 cycle time < 90s median
 - [ ] Audit log present for every agent and HITL decision
 - [ ] Four-layer storage architecture operational
-- [ ] LLM Provider Abstraction live with 2 providers
+- [ ] LLM Provider Abstraction live with 2 providers (Mistral + Moonshot Kimi)
 - [ ] Dual UI shipped with server-side RBAC enforcement
 - [ ] CI/CD pipeline shipping to staging and prod
 - [ ] Internal beta with 5 users for one week
