@@ -8,10 +8,10 @@ All API errors follow a consistent JSON envelope. Pipeline errors have a structu
 
 ```json
 {
-  "error": "ERROR_CODE",
-  "code": "SPECIFIC_CODE",
-  "message": "Human-readable description of what went wrong.",
-  "details": { "field": "...", "context": "..." }
+ "error": "ERROR_CODE",
+ "code": "SPECIFIC_CODE",
+ "message": "Human-readable description of what went wrong.",
+ "details": { "field": "...", "context": "..." }
 }
 ```
 
@@ -143,11 +143,11 @@ All API errors follow a consistent JSON envelope. Pipeline errors have a structu
 | Code | HTTP | Message | Resolution |
 |---|---|---|---|
 | `STORAGE_RAW_READ_FAILED` | 503 | Could not read raw file from Supabase Storage. Please retry. | Transient Supabase Storage issue |
-| `STORAGE_CURATED_WRITE_FAILED` | 503 | Could not write curated Parquet to Supabase Storage. | Transient issue; pipeline will retry automatically (up to 3 attempts) |
+| `STORAGE_CURATED_WRITE_FAILED` | 503 | Could not write JSON to Supabase Storage. | Transient issue; pipeline will retry automatically (up to 3 attempts) |
 | `STORAGE_PARQUET_CORRUPT` | 422 | Curated Parquet file for dataset {dataset_id} version {v} is corrupt. | Re-run cleaning from raw |
 | `STORAGE_QUOTA_EXCEEDED` | 429 | Storage quota exceeded (5GB limit in Phase 1). Please delete old datasets. | Clean up old datasets; quota raised in Phase 2 plans |
-| `STORAGE_DUCKDB_QUERY_FAILED` | 500 | DuckDB query execution failed: {detail}. | Report with dataset_id and intent_id |
-| `STORAGE_WEAVIATE_UPSERT_FAILED` | 503 | Failed to write embeddings to Weaviate. | Transient Weaviate issue; retry |
+| `STORAGE_DUCKDB_QUERY_FAILED` | 500 | PostgreSQL query execution failed: {detail}. | Report with dataset_id and intent_id |
+| `STORAGE_WEAVIATE_UPSERT_FAILED` | 503 | Failed to write embeddings to Supabase Vector (pgvector). | Transient Supabase Vector (pgvector) issue; retry |
 
 ---
 
@@ -166,33 +166,33 @@ All API errors follow a consistent JSON envelope. Pipeline errors have a structu
 
 ```
 uploaded
-    │
-    ▼
+ │
+ ▼
 profiling ──── error (INGEST_*) ──────────────────────────► failed
-    │
-    ▼
-awaiting_hitl_merge  ◄── user reviews HITL #1
-    │
-    ▼ (user POSTs decision)
+ │
+ ▼
+awaiting_hitl_merge ◄── user reviews HITL #1
+ │
+ ▼ (user POSTs decision)
 cleaning_plan ──── error (CLEAN_PLAN_*) ──────────────────► failed
-    │
-    ▼
-awaiting_hitl_cleaning  ◄── user reviews HITL #2
-    │
-    ▼ (user POSTs decision)
+ │
+ ▼
+awaiting_hitl_cleaning ◄── user reviews HITL #2
+ │
+ ▼ (user POSTs decision)
 executing ──── error (CLEAN_EXECUTION_*) ─────────────────► failed
-    │
-    ▼
-awaiting_hitl_intent  ◄── user submits intent HITL #3
-    │
-    ▼
+ │
+ ▼
+awaiting_hitl_intent ◄── user submits intent HITL #3
+ │
+ ▼
 analysing ──── error (ANALYSIS_*) ────────────────────────► failed
-    │
-    ▼
+ │
+ ▼
 dashboard_generating ──── error (DASHBOARD_*) ───────────► failed
-    │
-    ▼
-ready  ✓
+ │
+ ▼
+ready ✓
 ```
 
 - **Paused states** (`awaiting_hitl_*`) persist full LangGraph state to Supabase Database + Supabase Storage. A worker crash does not lose user decisions.
@@ -220,18 +220,18 @@ Every error emitted in a pipeline step is logged with:
 
 ```json
 {
-  "level": "error",
-  "request_id": "...",
-  "user_id": "...",
-  "tenant_id": "...",
-  "dataset_id": "...",
-  "run_id": "...",
-  "agent_name": "cleaning_plan",
-  "error_code": "CLEAN_PLAN_GENERATION_FAILED",
-  "provider": "mistral",
-  "model": "mistral-small-latest",
-  "retry_attempt": 3,
-  "timestamp": "2026-05-21T10:00:00Z"
+ "level": "error",
+ "request_id": "...",
+ "user_id": "...",
+ "tenant_id": "...",
+ "dataset_id": "...",
+ "run_id": "...",
+ "agent_name": "cleaning_plan",
+ "error_code": "CLEAN_PLAN_GENERATION_FAILED",
+ "provider": "mistral",
+ "model": "mistral-small-latest",
+ "retry_attempt": 3,
+ "timestamp": "2026-05-21T10:00:00Z"
 }
 ```
 

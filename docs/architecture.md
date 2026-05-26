@@ -8,7 +8,7 @@ DataMind is a three-tier, cloud-native system:
 
 - **Presentation** — Next.js 14 frontend with two distinct UI surfaces (User `/app/*` and Admin `/admin/*`)
 - **Application** — Python/FastAPI API gateway + LangGraph agent orchestration service
-- **Infrastructure** — Supabase Storage (four-layer storage), Supabase Database (PostgreSQL + DuckDB in-process) + Weaviate (vector), Redis/Celery (job queue)
+- **Infrastructure** — Supabase Storage (four-layer storage), Supabase Database (PostgreSQL) + Supabase Vector (pgvector) (vector), Redis/FastAPI BackgroundTasks (job queue)
 
 The backend separates the API gateway from the agent worker so long-running pipelines scale independently of synchronous request traffic. All LLM calls flow through a configurable provider abstraction (LiteLLM-compatible).
 
@@ -18,79 +18,79 @@ The backend separates the API gateway from the agent worker so long-running pipe
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ PRESENTATION LAYER                                                   │
-│                                                                     │
-│  User UI (/app/*)               Admin UI (/admin/*)                 │
-│  Next.js 14 · TypeScript        Next.js 14 · TypeScript             │
-│  Tailwind CSS · shadcn/ui       (Same design system, orange accent) │
-│  Recharts (P1) · Vega-Lite (P2) RBAC-gated — 403 for non-admins    │
+│ PRESENTATION LAYER             │
+│                  │
+│ User UI (/app/*)    Admin UI (/admin/*)     │
+│ Next.js 14 · TypeScript  Next.js 14 · TypeScript    │
+│ Tailwind CSS · shadcn/ui  (Same design system, orange accent) │
+│ Recharts (P1) · Vega-Lite (P2) RBAC-gated — 403 for non-admins │
 └──────────────────────────────┬──────────────────────────────────────┘
-                               │ HTTPS / JWT Bearer
+        │ HTTPS / JWT Bearer
 ┌──────────────────────────────▼──────────────────────────────────────┐
-│ API GATEWAY LAYER                                                    │
-│                                                                     │
-│  FastAPI (Python 3.11+)                                             │
-│  Pydantic v2 request/response validation                            │
-│  JWT auth middleware (HS256, 1hr expiry, refresh tokens)            │
-│  RBAC middleware (role claim enforcement on every endpoint)         │
-│  Async job dispatch → returns job_id immediately                    │
-│  Rate limiting: 100 req/min per user                                │
+│ API GATEWAY LAYER             │
+│                  │
+│ FastAPI (Python 3.11+)            │
+│ Pydantic v2 request/response validation       │
+│ JWT auth middleware (HS256, 1hr expiry, refresh tokens)   │
+│ RBAC middleware (role claim enforcement on every endpoint)   │
+│ Async job dispatch → returns job_id immediately     │
+│ Rate limiting: 100 req/min per user        │
 └──────────────────────────────┬──────────────────────────────────────┘
-                               │ Enqueue / Dequeue
+        │ Enqueue / Dequeue
 ┌──────────────────────────────▼──────────────────────────────────────┐
-│ AGENT ORCHESTRATION LAYER                                           │
-│                                                                     │
-│  LangGraph Supervisor Agent (state machine)                         │
-│  ┌──────────┐ ┌──────────┐ ┌─────────────┐ ┌──────────────────┐   │
-│  │ Domain   │ │Ingestion │ │Cleaning Plan│ │Cleaning Executor │   │
-│  │ Agent    │ │ Agent    │ │   Agent     │ │    Agent         │   │
-│  └──────────┘ └──────────┘ └─────────────┘ └──────────────────┘   │
-│  ┌──────────┐ ┌──────────┐ ┌─────────────┐ ┌──────────────────┐   │
-│  │  Intent  │ │ Analysis │ │  Dashboard  │ │    Insights      │   │
-│  │  Agent   │ │  Agent   │ │    Agent    │ │    Agent         │   │
-│  └──────────┘ └──────────┘ └─────────────┘ └──────────────────┘   │
-│                                                                     │
-│  HITL Gate Manager (pause/resume at checkpoints #1/#2/#3)          │
+│ AGENT ORCHESTRATION LAYER           │
+│                  │
+│ LangGraph Supervisor Agent (state machine)       │
+│ ┌──────────┐ ┌──────────┐ ┌─────────────┐ ┌──────────────────┐ │
+│ │ Domain │ │Ingestion │ │Cleaning Plan│ │Cleaning Executor │ │
+│ │ Agent │ │ Agent │ │ Agent  │ │ Agent   │ │
+│ └──────────┘ └──────────┘ └─────────────┘ └──────────────────┘ │
+│ ┌──────────┐ ┌──────────┐ ┌─────────────┐ ┌──────────────────┐ │
+│ │ Intent │ │ Analysis │ │ Dashboard │ │ Insights  │ │
+│ │ Agent │ │ Agent │ │ Agent │ │ Agent   │ │
+│ └──────────┘ └──────────┘ └─────────────┘ └──────────────────┘ │
+│                  │
+│ HITL Gate Manager (pause/resume at checkpoints #1/#2/#3)   │
 └──────────────────────────────┬──────────────────────────────────────┘
-                               │
+        │
 ┌──────────────────────────────▼──────────────────────────────────────┐
-│ LLM PROVIDER ABSTRACTION LAYER                                      │
-│                                                                     │
-│  LiteLLM-compatible uniform interface                               │
-│  P1: Mistral (mistral-small, mistral-7b-instruct)                   │
-│      · Moonshot Kimi (kimi-k2, moonshot-v1)                         │
-│  P2: + Google Gemini Flash · Groq (Llama 3) · Ollama (self-hosted) │
-│                                                                     │
-│  Per-tenant defaults · Per-agent routing overrides                  │
-│  Structured JSON output enforcement + Pydantic validation           │
-│  Cost + latency tracking per call, per agent, per provider          │
-│  API keys via Supabase Vault (never in env files)                   │
+│ LLM PROVIDER ABSTRACTION LAYER          │
+│                  │
+│ LiteLLM-compatible uniform interface        │
+│ P1: Google Gemini 3.5 Flash (mistral-small, mistral-7b-instruct)     │
+│  · Google Gemini 3.5 Flash       │
+│ P2: + Google Gemini Flash · Groq (Llama 3) · Ollama (self-hosted) │
+│                  │
+│ Per-tenant defaults · Per-agent routing overrides     │
+│ Structured JSON output enforcement + Pydantic validation   │
+│ Cost + latency tracking per call, per agent, per provider   │
+│ API keys via Supabase Vault (never in env files)     │
 └──────────────────────────────┬──────────────────────────────────────┘
-                               │
+        │
 ┌──────────────────────────────▼──────────────────────────────────────┐
-│ FOUR-LAYER STORAGE                                                  │
-│                                                                     │
-│  Layer 1 — Raw (Supabase Storage, versioned, immutable)             │
-│    datamind-raw/{user_id}/{dataset_id}/{ts}/{filename}              │
-│    Never overwritten; source-of-truth for all re-processing         │
-│                                                                     │
-│  Layer 2 — Curated Parquet (Supabase Storage)                       │
-│    datamind-curated/{user_id}/{dataset_id}/v{n}/data.parquet        │
-│    Output of every cleaning run; versioned; queried by DuckDB       │
-│                                                                     │
-│  Layer 3 — Numeric/Structured (Supabase Database + DuckDB)          │
-│    One typed table per dataset_id                                   │
-│    Columns: int, float, bool, date, low-cardinality categoricals    │
-│    Access path: SQL (aggregate, filter, join)                       │
-│                                                                     │
-│  Layer 4 — Textual/Semantic (Weaviate)                              │
-│    Free-text columns embedded with tenant's default embedding model │
-│    HNSW index for cosine similarity                                 │
-│    Access path: semantic search (similarity queries)                │
-│                                                                     │
-│  Metadata Store — Supabase Database (PostgreSQL)                    │
-│    users · tenants · datasets · pipeline_runs · hitl_decisions      │
-│    llm_provider_config · audit_events · usage_meter (P2)            │
+│ FOUR-LAYER STORAGE             │
+│                  │
+│ Layer 1 — Raw (Supabase Storage, versioned, immutable)    │
+│ datamind-raw/{user_id}/{dataset_id}/{ts}/{filename}    │
+│ Never overwritten; source-of-truth for all re-processing   │
+│                  │
+│ Layer 2 — Curated Parquet (Supabase Storage)      │
+│ datamind-json/{user_id}/{dataset_id}/v{n}/data.json  │
+│ Output of every cleaning run; versioned; queried by PostgreSQL  │
+│                  │
+│ Layer 3 — Numeric/Structured (Supabase Database + PostgreSQL)   │
+│ One typed table per dataset_id         │
+│ Columns: int, float, bool, date, low-cardinality categoricals │
+│ Access path: SQL (aggregate, filter, join)      │
+│                  │
+│ Layer 4 — Textual/Semantic (Supabase Vector (pgvector))        │
+│ Free-text columns embedded with tenant's default embedding model │
+│ HNSW index for cosine similarity         │
+│ Access path: semantic search (similarity queries)    │
+│                  │
+│ Metadata Store — Supabase Database (PostgreSQL)     │
+│ users · tenants · datasets · pipeline_runs · hitl_decisions  │
+│ llm_provider_config · audit_events · usage_meter (P2)   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -100,76 +100,76 @@ The backend separates the API gateway from the agent worker so long-running pipe
 
 ```
 1. DOMAIN SELECTION
-   User picks domain (Finance / Healthcare / Retail / Marketing / Operations / Other)
-   Domain Agent loads matching prompt pack → injects vocabulary, KPIs, validation rules
-   into context for ALL downstream agents.
+ User picks domain (Finance / Healthcare / Retail / Marketing / Operations / Other)
+ Domain Agent loads matching prompt pack → injects vocabulary, KPIs, validation rules
+ into context for ALL downstream agents.
 
 2. FILE UPLOAD
-   User drags 1–10 files of the same format onto the Upload Screen.
-   Frontend requests presigned Supabase Storage URLs from /api/v1/datasets/upload-url.
-   Files upload directly to Layer 1 (Supabase Storage bucket).
-   Backend returns dataset_id + job_id.
+ User drags 1–10 files of the same format onto the Upload Screen.
+ Frontend requests presigned Supabase Storage URLs from /api/v1/datasets/upload-url.
+ Files upload directly to Layer 1 (Supabase Storage bucket).
+ Backend returns dataset_id + job_id.
 
 3. DETECT & PROFILE (Ingestion Agent)
-   Detects format (mime + content sniff).
-   Parses sample rows; classifies each column:
-     • numeric/structured  → proposed for Layer 3
-     • textual/semantic    → proposed for Layer 4
-     • ambiguous           → surfaced at HITL #1
+ Detects format (mime + content sniff).
+ Parses sample rows; classifies each column:
+  • numeric/structured → proposed for Layer 3
+  • textual/semantic → proposed for Layer 4
+  • ambiguous   → surfaced at HITL #1
 
 4. HITL #1 — SCHEMA & MERGE VALIDATION
-   User sees: per-file column list + dtype + proposed type-routing.
-   User sees: proposed merge plan (UNION / JOIN / keep separate) with confidence.
-   User can: confirm, change merge key, change type-routing, exclude column/file.
-   Pipeline BLOCKS until user POSTs decision to /datasets/{id}/merge-plan/decision.
-   Decision recorded in hitl_decisions table.
+ User sees: per-file column list + dtype + proposed type-routing.
+ User sees: proposed merge plan (UNION / JOIN / keep separate) with confidence.
+ User can: confirm, change merge key, change type-routing, exclude column/file.
+ Pipeline BLOCKS until user POSTs decision to /datasets/{id}/merge-plan/decision.
+ Decision recorded in hitl_decisions table.
 
 5. CONVERSION & ROUTING (Ingestion Agent)
-   Approved merge plan executed → unified Parquet written to Layer 2.
-   Numeric columns loaded into Supabase Database table (Layer 3).
-   Textual columns embedded and stored in Weaviate (Layer 4).
-   Original strings retained in Parquet.
+ Approved merge plan executed → unified Parquet written to Layer 2.
+ Numeric columns loaded into Supabase Database table (Layer 3).
+ Textual columns embedded and stored in Supabase Vector (pgvector) (Layer 4).
+ Original strings retained in Parquet.
 
 6. CLEANING PLAN (Cleaning Plan Agent)
-   Inspects Parquet profile; generates numbered cleaning plan:
-     • exact dedup, missing-value imputation (median/mean/mode/drop/leave),
-       type coercion, outlier flagging (no auto-fix in P1)
-   Each step: rationale + confidence score (0.0–1.0).
-   NOTHING executes yet.
+ Inspects Parquet profile; generates numbered cleaning plan:
+  • exact dedup, missing-value imputation (median/mean/mode/drop/leave),
+  type coercion, outlier flagging (no auto-fix in P1)
+ Each step: rationale + confidence score (0.0–1.0).
+ NOTHING executes yet.
 
 7. HITL #2 — CLEANING PLAN APPROVAL
-   User sees: numbered plan with confidence badges (red <0.50, orange <0.70, yellow <0.90).
-   User can: approve all / approve some / modify a step / reject.
-   Low-confidence steps (< 0.50) unchecked by default.
-   Pipeline BLOCKS until user POSTs decision to /datasets/{id}/cleaning-plan/decision.
-   Decision + modifications recorded in hitl_decisions.
+ User sees: numbered plan with confidence badges (red <0.50, orange <0.70, yellow <0.90).
+ User can: approve all / approve some / modify a step / reject.
+ Low-confidence steps (< 0.50) unchecked by default.
+ Pipeline BLOCKS until user POSTs decision to /datasets/{id}/cleaning-plan/decision.
+ Decision + modifications recorded in hitl_decisions.
 
 8. CLEANING EXECUTION (Cleaning Executor Agent)
-   Executes ONLY approved steps against Layer 2 Parquet.
-   Each action logged: action_type, rows_affected, before/after counts, rationale,
-   confidence, timestamp, prompt_template_version, user_decision.
+ Executes ONLY approved steps against Layer 2 Parquet.
+ Each action logged: action_type, rows_affected, before/after counts, rationale,
+ confidence, timestamp, prompt_template_version, user_decision.
 
 9. INTENT CAPTURE (Intent Agent — HITL #3)
-   Modal: "What are you trying to learn from this data?"
-   Shows 3+ domain-tuned suggestion chips from active prompt pack.
-   Intent Agent returns one-line restatement; user confirms or refines.
-   Intent embedded + persisted; analysis_spec structured.
+ Modal: "What are you trying to learn from this data?"
+ Shows 3+ domain-tuned suggestion chips from active prompt pack.
+ Intent Agent returns one-line restatement; user confirms or refines.
+ Intent embedded + persisted; analysis_spec structured.
 
 10. ANALYSIS (Analysis Agent)
-    Numeric questions → SQL on Supabase Database / DuckDB (Layer 3).
-    Textual questions → semantic search on Weaviate (Layer 4).
-    Hybrid questions → combine both paths.
+ Numeric questions → SQL on Supabase Database / PostgreSQL (Layer 3).
+ Textual questions → semantic search on Supabase Vector (pgvector) (Layer 4).
+ Hybrid questions → combine both paths.
 
 11. DASHBOARD (Dashboard Agent)
-    Produces Vega-Lite specs: 2–3 KPI cards + 2 charts (line/bar/table in P1).
-    Chart data validated programmatically; DDL/writes blocked (sqlglot).
+ Produces Vega-Lite specs: 2–3 KPI cards + 2 charts (line/bar/table in P1).
+ Chart data validated programmatically; DDL/writes blocked (sqlglot).
 
 12. INSIGHTS (Insights Agent)
-    Short domain-flavoured narrative + recommended next action.
-    Narrative checked for factual consistency with chart data.
+ Short domain-flavoured narrative + recommended next action.
+ Narrative checked for factual consistency with chart data.
 
 13. AUDIT LOG
-    Available at every step. Downloadable as JSON or CSV from /jobs/{id}/audit.
+ Available at every step. Downloadable as JSON or CSV from /jobs/{id}/audit.
 ```
 
 ---
@@ -190,11 +190,11 @@ The backend separates the API gateway from the agent worker so long-running pipe
 |---|---|---|---|
 | Supervisor | Orchestrates pipeline; routes, retries, aggregates; enforces HITL gates | P1 | LangGraph state machine |
 | Domain | Loads domain prompt pack; supplies context to all downstream agents | P1 | Prompt pack loader, Supabase Database lookup |
-| Ingestion | Format detection, parsing, profiling, column classification, merge planning | P1 | PyArrow, Pandas, openpyxl, python-magic, chardet |
-| Cleaning Plan | Drafts numbered cleaning plan with rationale + confidence — does NOT execute | P1 | LLM via abstraction, Pandas profile |
-| Cleaning Executor | Executes only approved steps; writes to Layer 2; logs every action | P1 | Pandas, Pydantic, audit logger |
-| Intent | Parses user's natural-language goal into a structured analysis spec | P1 | LLM via abstraction, Weaviate schema embeddings |
-| Analysis | SQL on Supabase Database/DuckDB for numeric; semantic search on Weaviate for textual | P1 | DuckDB, Weaviate client, SQL builder (sqlglot) |
+| Ingestion | Format detection, parsing, profiling, column classification, merge planning | P1 | openpyxl, python-magic, chardet, Python stdlib (csv, json) |
+| Cleaning Plan | Drafts numbered cleaning plan with rationale + confidence — does NOT execute | P1 | LLM via abstraction, Python stdlib profiling |
+| Cleaning Executor | Executes only approved steps; writes to Layer 2; logs every action | P1 | Python stdlib (csv, json, statistics), Pydantic, audit logger |
+| Intent | Parses user's natural-language goal into a structured analysis spec | P1 | LLM via abstraction, Supabase Vector (pgvector) schema embeddings |
+| Analysis | SQL on Supabase Database/PostgreSQL for numeric; semantic search on Supabase Vector (pgvector) for textual | P1 | PostgreSQL, Supabase Vector (pgvector) client, SQL builder (sqlglot) |
 | Dashboard | Converts analysis results into Vega-Lite specs | P1 | LLM via abstraction, fixed Vega-Lite schema set |
 | Insights | Short domain-flavoured narrative + recommended next action | P1 | LLM via abstraction |
 | Outlier (advanced) | Flags statistical outliers; recommends keep / clip / remove | P2 | scipy, scikit-learn (Isolation Forest) |
@@ -221,16 +221,16 @@ Every HITL decision is recorded: `user_id`, `timestamp`, `dataset_id`, `agent_st
 
 ```
 For each column in the ingested dataset:
-  (a) Is dtype int / float / bool / date / datetime?
-      → numeric/structured → Layer 3 (Supabase Database) + Layer 2 (Parquet column)
-  (b) Is string where ≥ 95% of non-null values parse cleanly as above?
-      → numeric/structured
-  (c) Is string with distinct ≤ 50 AND avg string length ≤ 40?
-      → low-cardinality categorical → numeric/structured
-  (d) Is string with avg length > 40 chars AND distinct > 50% of row count?
-      → textual/semantic → Layer 4 (Weaviate) + Layer 2 (Parquet original)
-  (e) None of the above (e.g., short strings, high cardinality — IDs or labels)?
-      → ambiguous → surface at HITL #1, user decides
+ (a) Is dtype int / float / bool / date / datetime?
+  → numeric/structured → Layer 3 (Supabase Database) + Layer 2 (Parquet column)
+ (b) Is string where ≥ 95% of non-null values parse cleanly as above?
+  → numeric/structured
+ (c) Is string with distinct ≤ 50 AND avg string length ≤ 40?
+  → low-cardinality categorical → numeric/structured
+ (d) Is string with avg length > 40 chars AND distinct > 50% of row count?
+  → textual/semantic → Layer 4 (Supabase Vector (pgvector)) + Layer 2 (Parquet original)
+ (e) None of the above (e.g., short strings, high cardinality — IDs or labels)?
+  → ambiguous → surface at HITL #1, user decides
 ```
 
 ---
@@ -252,9 +252,9 @@ For each column in the ingested dataset:
 ```python
 # Uniform interface — provider is resolved at runtime from tenant config
 response = await llm_client.structured_completion(
-    schema=CleaningPlanOutput,           # Pydantic model
-    prompt=assembled_prompt,
-    provider_override="mistral",         # optional; uses tenant default if omitted
+ schema=CleaningPlanOutput,   # Pydantic model
+ prompt=assembled_prompt,
+ provider_override="mistral",   # optional; uses tenant default if omitted
 )
 # Non-conforming outputs are retried up to 3 times, then escalate as pipeline failure
 ```
@@ -271,7 +271,7 @@ response = await llm_client.structured_completion(
 - **RBAC**: Two roles in P1 (user, admin) — enforced server-side on every endpoint. Role embedded in JWT claim; demotion invalidates tokens within 15 min via refresh-token rotation.
 - **UI separation**: `/admin/*` returns HTTP 403 from FastAPI middleware for non-admin tokens. Frontend hides admin nav — but the server is the source of truth.
 - **Supabase Storage isolation**: Per-user prefix isolation. Each user can only read/write their own `{user_id}/` prefix via signed URLs.
-- **Tenant isolation**: `tenant_id` scoping on every Supabase Database query. Weaviate collection namespace per tenant.
+- **Tenant isolation**: `tenant_id` scoping on every Supabase Database query. pgvector collection namespace per tenant.
 - **Encryption at rest**: AES-256 (Supabase managed, P1 + P2).
 - **Encryption in transit**: TLS 1.3 minimum.
 - **Secrets**: Supabase Vault — API keys, signing secrets, third-party credentials stored there, not in environment files.
@@ -301,7 +301,7 @@ Images pushed to **GitHub Container Registry (GHCR)**. Infrastructure defined in
 | Dev (local) | Docker Compose + Supabase local emulator | Synthetic data only |
 | Staging | Single Docker service, Supabase Database (single-AZ) | Anonymised production-shape data |
 | Production (P1) | Docker Compose / Render, Supabase Database (single-AZ) | Per-user prefix isolation; AES-256 encryption |
-| Production (P2) | Auto-scaling Celery workers (Redis queue depth) + Supabase Database (Multi-AZ) | Same + auto-scaling |
+| Production (P2) | Auto-scaling background workers (queue depth) + Supabase Database (Multi-AZ) | Same + auto-scaling |
 
 ---
 

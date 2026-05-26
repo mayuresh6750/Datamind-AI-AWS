@@ -42,30 +42,29 @@ git checkout development
 cp .env.example .env
 # → fill in the keys you need (ask team lead in #datamind-secrets)
 # Required: DATABASE_URL, REDIS_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
-#           S3_RAW_BUCKET, S3_CURATED_BUCKET, ANTHROPIC_API_KEY, OPENAI_API_KEY
+#   S3_RAW_BUCKET, S3_CURATED_BUCKET, ANTHROPIC_API_KEY, OPENAI_API_KEY
 
 # 3. Python backend
-uv sync                          # installs every Python package in the workspace
+uv sync       # installs every Python package in the workspace
 
 # 4. JS workspace (Next.js frontend)
 pnpm install
 
 # 5. Local services (Postgres with pgvector + Redis)
-docker compose up -d             # starts Postgres (with pgvector), Redis
+docker compose up -d    # starts Postgres (with pgvector), Redis
 
 # 6. Apply DB migrations
-uv run alembic upgrade head      # creates users, datasets, pipeline_runs, audit_log tables
+uv run alembic upgrade head  # creates users, datasets, pipeline_runs, audit_log tables
 
 # 7. Start backend services
-uv run uvicorn apps.api.main:app --reload          # FastAPI on :8000
-uv run celery -A apps.worker.celery_app worker     # Celery agent worker
+uv run uvicorn apps.api.main:app --reload   # FastAPI on :8000
 
 # 8. Start frontend
-pnpm --filter web dev                              # Next.js on :3000
+pnpm --filter web dev        # Next.js on :3000
 
 # 9. Sanity check
 curl http://localhost:8000/health
-# → {"status": "ok", "db": "ok", "redis": "ok", "s3": "ok"}
+# → {"status": "ok", "db": "ok"}
 ```
 
 If step 9 returns OK, you're set up. Open the README in your owned folder (e.g., `apps/web/README.md`, `apps/api/README.md`, `packages/agents/README.md`) — it explains what code goes there.
@@ -87,10 +86,10 @@ If step 9 returns OK, you're set up. Open the README in your owned folder (e.g.,
 ### Branch naming convention
 
 ```
-<your-name>/feat-<short-slug>      ← new feature / new code
-<your-name>/fix-<short-slug>       ← bug fix
-<your-name>/chore-<short-slug>     ← refactor / cleanup / docs
-<your-name>/test-<short-slug>      ← test-only work
+<your-name>/feat-<short-slug>  ← new feature / new code
+<your-name>/fix-<short-slug>  ← bug fix
+<your-name>/chore-<short-slug>  ← refactor / cleanup / docs
+<your-name>/test-<short-slug>  ← test-only work
 ```
 
 Use your real name (kebab-case) — `jane-doe`, not initials, not role IDs. The slug is what the work *is*, in 2–5 words.
@@ -126,8 +125,8 @@ git push -u origin jane-doe/feat-hitl-cleaning-screen
 
 # When ready, open a PR via the GitHub UI or:
 gh pr create --base development \
-  --title "[Phase 1] HITL #2 — cleaning plan approval screen" \
-  --body-file .github/pr-template.md
+ --title "[Phase 1] HITL #2 — cleaning plan approval screen" \
+ --body-file .github/pr-template.md
 
 # Address review comments, push more commits to the same branch
 git push
@@ -200,9 +199,9 @@ Run through this checklist:
 
 ```
 Yesterday: <what you finished>
-Today:     <what you'll work on>
-Files:     <files you'll edit today>
-Blockers:  <who you're waiting on, or "none">
+Today:  <what you'll work on>
+Files:  <files you'll edit today>
+Blockers: <who you're waiting on, or "none">
 ```
 
 Team lead scans the thread, flags conflicts, resolves before 10:30 AM.
@@ -219,7 +218,7 @@ Team lead scans the thread, flags conflicts, resolves before 10:30 AM.
 | LLM provider config / cost / model choice | AI/Agent Lead |
 | API design / FastAPI / Pydantic | Backend Lead |
 | Frontend / Next.js / Vega-Lite / shadcn | Frontend Lead |
-| AWS infra / S3 / RDS / Celery / Redis | Infra Engineer |
+| AWS infra / S3 / RDS / FastAPI BackgroundTasks / Redis | Infra Engineer |
 | CI failure | Infra Engineer |
 | Test failure / golden datasets | QA Engineer |
 | UX / HITL screen design | Designer |
@@ -232,41 +231,41 @@ Team lead scans the thread, flags conflicts, resolves before 10:30 AM.
 
 ```bash
 # Python
-uv sync                                             # install Python workspace
-uv run pytest                                       # run all tests
-uv run pytest tests/agents/                         # agent-specific tests
-uv run pytest tests/hitl/                           # HITL flow tests
-uv run ruff check .                                 # lint
-uv run black --check .                              # format check
-uv run black .                                      # apply formatting
-uv run mypy packages/agents                         # strict typecheck on agents
+uv sync            # install Python workspace
+uv run pytest          # run all tests
+uv run pytest tests/agents/       # agent-specific tests
+uv run pytest tests/hitl/       # HITL flow tests
+uv run ruff check .         # lint
+uv run black --check .        # format check
+uv run black .          # apply formatting
+uv run mypy packages/agents       # strict typecheck on agents
 
 # Run backend services
-uv run uvicorn apps.api.main:app --reload           # FastAPI on :8000
-uv run celery -A apps.worker.celery_app worker      # Celery pipeline worker
-uv run celery -A apps.worker.celery_app flower      # Celery monitoring UI on :5555
+uv run uvicorn apps.api.main:app --reload   # FastAPI on :8000
+uv run celery -A apps.worker.celery_app worker  # pipeline worker
+uv run celery -A apps.worker.celery_app flower  # worker monitoring UI on :5555
 
 # Run frontend
-pnpm --filter web dev                               # Next.js (User + Admin UI) on :3000
+pnpm --filter web dev        # Next.js (User + Admin UI) on :3000
 
 # Database
-docker compose up -d                                # start Postgres + Redis
-uv run alembic upgrade head                         # apply migrations
-uv run alembic revision --autogenerate -m "msg"     # generate new migration
-uv run alembic downgrade -1                         # roll back one migration
-psql $DATABASE_URL                                  # direct DB access
+docker compose up -d        # start Postgres
+uv run alembic upgrade head       # apply migrations
+uv run alembic revision --autogenerate -m "msg"  # generate new migration
+uv run alembic downgrade -1       # roll back one migration
+psql $DATABASE_URL         # direct DB access
 
 # Storage (local S3 via LocalStack or real AWS)
-aws s3 ls s3://$S3_RAW_BUCKET/                      # list raw uploads
-aws s3 ls s3://$S3_CURATED_BUCKET/                  # list curated Parquet files
+aws s3 ls s3://$S3_RAW_BUCKET/      # list raw uploads
+aws s3 ls s3://$S3_CURATED_BUCKET/     # list JSON files
 
 # Job queue
-redis-cli monitor                                   # watch Celery job events
+redis-cli monitor         # watch FastAPI BackgroundTasks job events
 
 # Git
-git checkout development && git pull                # sync integration branch
-git checkout -b your-name/feat-thing               # new feature branch
-gh pr create --base development                    # open PR
+git checkout development && git pull    # sync integration branch
+git checkout -b your-name/feat-thing    # new feature branch
+gh pr create --base development     # open PR
 ```
 
 ---
@@ -285,7 +284,7 @@ This rule is the same as for human contributors — **no exceptions for AI-gener
 Pay particular attention to DataMind-specific invariants:
 - Never bypass a HITL gate.
 - Never call an LLM provider SDK directly — always through the provider abstraction layer.
-- Never write to Layer 1 (raw S3) from any agent other than the Ingestion Agent's initial upload.
+- Never write to Layer 1 (archive) from any agent other than the Ingestion Agent's initial upload.
 - Never log row-level user data — schema metadata only.
 
 ---

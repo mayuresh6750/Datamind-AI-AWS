@@ -10,8 +10,8 @@
 | Role Code | Role | Responsibility |
 |---|---|---|
 | **FE** | Frontend Developer | Next.js 14, TypeScript, Tailwind, shadcn/ui, Recharts, Vega-Lite |
-| **BE** | Backend Developer | FastAPI, Pydantic v2, Supabase Database (PostgreSQL), Alembic, Celery, Redis |
-| **AI** | AI / Agent Engineer | LangGraph agents, LLM abstraction (Mistral + Kimi), Weaviate, DuckDB, domain packs |
+| **BE** | Backend Developer | FastAPI, Pydantic v2, Supabase Database (PostgreSQL), Alembic, FastAPI BackgroundTasks, Redis |
+| **AI** | AI / Agent Engineer | LangGraph agents, LLM abstraction (Google Gemini 3.5 Flash + Kimi), Supabase Vector (pgvector), PostgreSQL, domain packs |
 | **DO** | DevOps / Infra Engineer | Supabase (Storage + Database + Vault), Docker, GitHub Actions CI/CD, GHCR, Prometheus/Grafana |
 | **QA** | QA Engineer | Unit tests, integration tests, E2E tests, golden datasets, performance |
 
@@ -20,7 +20,7 @@
 ## Task ID Convention
 
 ```
-S{sprint}-{seq}   e.g. S1-01, S3-07
+S{sprint}-{seq} e.g. S1-01, S3-07
 ```
 
 Priority: **P1** = Must-have (blocks release) | **P2** = High | **P3** = Medium
@@ -37,7 +37,7 @@ Priority: **P1** = Must-have (blocks release) | **P2** = High | **P3** = Medium
 | S1-01 | Set up Git repo, branch strategy, PR template, CODEOWNERS | DO | P1 | 1 | — |
 | S1-02 | GitHub Actions CI/CD — lint (ruff, eslint), typecheck (mypy, tsc), unit tests, Docker build, push to GHCR, staging deploy | DO | P1 | 3 | S1-01 |
 | S1-03 | Provision Supabase project — Storage buckets (raw + curated), Database (PostgreSQL, single-AZ), Vault for secrets, Redis | DO | P1 | 3 | — |
-| S1-04 | Docker Compose for local dev — Supabase local emulator (Postgres) + Weaviate + Redis | DO | P1 | 2 | — |
+| S1-04 | Docker Compose for local dev — Supabase local emulator (Postgres) + Supabase Vector (pgvector) + Redis | DO | P1 | 2 | — |
 | S1-05 | FastAPI project structure — routers, middleware, dependencies, pyproject.toml, uv workspace | BE | P1 | 2 | S1-04 |
 | S1-06 | Database schema + Alembic migrations — users, tenants, datasets, pipeline_runs, hitl_decisions, audit_events, jobs, llm_provider_config | BE | P1 | 3 | S1-03, S1-04 |
 | S1-07 | JWT auth endpoints — POST /auth/signup, /auth/login, /auth/refresh, /auth/logout | BE | P1 | 3 | S1-06 |
@@ -62,7 +62,7 @@ Priority: **P1** = Must-have (blocks release) | **P2** = High | **P3** = Medium
 | S2-02 | PATCH /me/domain API endpoint — update active domain on user profile | BE | P1 | 1 | S1-08 |
 | S2-03 | File upload screen (U3) — drag-and-drop, browse, multi-file, format validation, progress bar | FE | P1 | 3 | S1-11 |
 | S2-04 | POST /datasets/upload-url — generate presigned Supabase Storage URLs for direct browser upload (per file) | BE | P1 | 2 | S1-08 |
-| S2-05 | POST /datasets/{id}/ingest — enqueue Celery ingestion job, return job_id | BE | P1 | 2 | S2-04 |
+| S2-05 | POST /datasets/{id}/ingest — trigger via FastAPI BackgroundTasks ingestion job, return job_id | BE | P1 | 2 | S2-04 |
 | S2-06 | Ingestion Agent — format detection (mime sniff + content sniff) for CSV, XLSX, JSON, Parquet | AI | P1 | 3 | S1-05 |
 | S2-07 | Ingestion Agent — parsing + column profiling (row count, dtype, null count, distinct count, avg string length) | AI | P1 | 3 | S2-06 |
 | S2-08 | Ingestion Agent — multi-file merge plan (UNION vs JOIN detection, merge key proposal, confidence) | AI | P1 | 3 | S2-07 |
@@ -90,8 +90,8 @@ Priority: **P1** = Must-have (blocks release) | **P2** = High | **P3** = Medium
 | S3-06 | HITL Gate Manager — pause_pipeline_for_decision(), resume_pipeline_with_decision(), state snapshot to Supabase Storage | AI | P1 | 3 | S3-05 |
 | S3-07 | Pipeline state persistence — serialise full pipeline state to Supabase Storage + Supabase Database after every agent step | BE | P1 | 3 | S3-05, S1-03 |
 | S3-08 | LLM Provider Abstraction — LiteLLM-compatible interface, structured_completion(), Pydantic output validation, retry logic (3×) | AI | P1 | 4 | S1-05 |
-| S3-09 | Mistral provider — API key from Supabase Vault, structured JSON mode, token/cost/latency logging | AI | P1 | 2 | S3-08 |
-| S3-10 | Moonshot Kimi provider — API key from Supabase Vault, structured JSON mode, token/cost/latency logging | AI | P1 | 2 | S3-08 |
+| S3-09 | Google Gemini 3.5 Flash provider — API key from Supabase Vault, structured JSON mode, token/cost/latency logging | AI | P1 | 2 | S3-08 |
+| S3-10 | Google Gemini 3.5 Flash provider — API key from Supabase Vault, structured JSON mode, token/cost/latency logging | AI | P1 | 2 | S3-08 |
 | S3-11 | Cleaning Plan Agent — exact dedup detection + imputation strategy (median/mean/mode/drop/leave) | AI | P1 | 3 | S3-05, S3-08 |
 | S3-12 | Cleaning Plan Agent — type coercion proposals + basic outlier flagging (no auto-fix) | AI | P1 | 3 | S3-11 |
 | S3-13 | Confidence scoring — 0.0–1.0 per step, colour thresholds (red <0.50, orange <0.70, yellow <0.90) | AI | P1 | 2 | S3-11 |
@@ -111,15 +111,15 @@ Priority: **P1** = Must-have (blocks release) | **P2** = High | **P3** = Medium
 | S4-01 | Cleaning plan review screen (HITL #2, U5) — numbered steps, confidence badges, per-step approve/modify/reject | FE | P1 | 4 | S3-01, S3-14 |
 | S4-02 | Modify step UI — imputation strategy picker, column exclusion, custom value input | FE | P1 | 3 | S4-01 |
 | S4-03 | POST /datasets/{id}/cleaning-plan/decision — record approved/modified/rejected steps, enqueue executor | BE | P1 | 2 | S3-04 |
-| S4-04 | Cleaning Executor Agent — run only approved steps against curated Parquet, write audit event per step | AI | P1 | 3 | S3-11, S4-03 |
+| S4-04 | Cleaning Executor Agent — run only approved steps against JSON, write audit event per step | AI | P1 | 3 | S3-11, S4-03 |
 | S4-05 | Write cleaned data to curated Supabase Storage Parquet (Layer 2) — versioned per cleaning run | BE | P1 | 2 | S4-04 |
 | S4-06 | Load numeric/structured columns into Supabase Database table (Layer 3) — one typed table per dataset_id | BE | P1 | 3 | S4-05 |
-| S4-07 | Embed textual columns + load into Weaviate (Layer 4) — HNSW index, per-tenant collection namespace | AI | P1 | 3 | S4-05 |
+| S4-07 | Embed textual columns + load into Supabase Vector (pgvector) (Layer 4) — HNSW index, per-tenant collection namespace | AI | P1 | 3 | S4-05 |
 | S4-08 | Intent capture screen (U6) — free-text input, domain-tuned suggestion chips, HITL #3 confirmation | FE | P1 | 3 | S4-01 |
 | S4-09 | POST /datasets/{id}/intent — submit intent text, return restated interpretation for HITL #3 | BE | P1 | 1 | S4-05 |
 | S4-10 | Intent Agent — parse free-text goal into structured AnalysisSpec, biased by domain pack + schema | AI | P1 | 3 | S3-08, S3-05 |
-| S4-11 | Analysis Agent — SQL builder (sqlglot) + DuckDB runner for numeric questions (Layer 3) | AI | P1 | 3 | S4-06, S4-10 |
-| S4-12 | Analysis Agent — Weaviate semantic search for textual questions (Layer 4) | AI | P1 | 3 | S4-07, S4-10 |
+| S4-11 | Analysis Agent — SQL builder (sqlglot) + PostgreSQL runner for numeric questions (Layer 3) | AI | P1 | 3 | S4-06, S4-10 |
+| S4-12 | Analysis Agent — Supabase Vector (pgvector) semantic search for textual questions (Layer 4) | AI | P1 | 3 | S4-07, S4-10 |
 | S4-13 | SQL safety validation — sqlglot parse, block all non-SELECT statements before execution | BE | P1 | 2 | S4-11 |
 | S4-14 | POST /dashboards/generate — enqueue dashboard generation job, return job_id | BE | P1 | 1 | S4-11 |
 | S4-15 | Dashboard Agent — Vega-Lite spec generation (2–3 KPI cards + 2 charts: bar/line/table) | AI | P1 | 4 | S4-11, S4-12 |
@@ -150,12 +150,12 @@ Priority: **P1** = Must-have (blocks release) | **P2** = High | **P3** = Medium
 | S5-11 | Grafana dashboards + alerting — all 7 alert conditions (job failure, latency, Supabase Storage write, LLM error, HITL queue, spend, confidence) | DO | P1 | 3 | S5-10 |
 | S5-12 | Staging deployment — Docker Compose / Render, GHCR image pull, Supabase Database migration on deploy | DO | P1 | 3 | S1-02, S1-03 |
 | S5-13 | Unit tests — agent functions, transform logic, API handlers (≥ 70% coverage) | QA | P1 | 3 | S4-16 |
-| S5-14 | Integration tests — agent-to-agent, Supabase Storage reads/writes, DuckDB, Weaviate (happy paths + key errors) | QA | P1 | 3 | S4-16 |
+| S5-14 | Integration tests — agent-to-agent, Supabase Storage reads/writes, PostgreSQL, Supabase Vector (pgvector) (happy paths + key errors) | QA | P1 | 3 | S4-16 |
 | S5-15 | E2E tests — single-file pipeline for all 4 formats (CSV, XLSX, JSON, Parquet) | QA | P1 | 4 | S4-17 |
 | S5-16 | E2E tests — multi-file pipeline (2-file + 5-file, union + join paths) | QA | P1 | 3 | S4-17 |
 | S5-17 | HITL flow tests — all decision branches per gate (#1, #2, #3): approve / modify / reject | QA | P1 | 3 | S4-17 |
 | S5-18 | RBAC enforcement tests — 403 for all admin routes with non-admin token (full matrix) | QA | P1 | 2 | S5-07 |
-| S5-19 | LLM portability tests — run full pipeline on Mistral + Moonshot Kimi, verify no quality regression | QA | P1 | 3 | S5-14 |
+| S5-19 | LLM portability tests — run full pipeline on Google Gemini 3.5 Flash, verify no quality regression | QA | P1 | 3 | S5-14 |
 | S5-20 | Performance tests — 50MB single file, p95 dashboard latency < 90s, HITL cycle time < 90s median | QA | P1 | 2 | S5-15 |
 | S5-21 | Golden dataset validation — 10 datasets, ≥ 70% cleaning acceptance rate | QA | P1 | 4 | S5-15 |
 | S5-22 | Bug fixes + polish from QA findings | ALL | P1 | 4 | S5-21 |
@@ -212,7 +212,7 @@ A task is **Done** when:
 - [ ] Cleaning plan generated with numbered steps, rationale, confidence scores
 - [ ] HITL #2 allows step-level approve/modify/reject; nothing runs before submit
 - [ ] Only approved cleaning steps execute; raw data (Layer 1) never modified
-- [ ] Cleaned data in curated Parquet (Supabase Storage); numeric → Supabase Database/DuckDB; textual → Weaviate
+- [ ] Cleaned data in JSON (Supabase Storage); numeric → Supabase Database/PostgreSQL; textual → Supabase Vector (pgvector)
 - [ ] Intent capture with domain chips; parsed into structured analysis spec
 - [ ] Dashboard renders (2–3 KPI cards + 2 charts) within 90s of intent submission
 - [ ] Insights narrative generated with domain vocabulary
@@ -220,7 +220,7 @@ A task is **Done** when:
 - [ ] Pipeline re-runnable from raw layer (100%)
 - [ ] Admin UI — all 5 screens functional; LLM config admin-controlled
 - [ ] RBAC: admin routes return 403 for non-admin users (server-side enforced)
-- [ ] Pipeline runs end-to-end on Mistral AND Moonshot Kimi
+- [ ] Pipeline runs end-to-end on Google Gemini 3.5 Flash AND Google Gemini 3.5 Flash
 - [ ] CI/CD: lint + typecheck + tests pass on every merge; images pushed to GHCR
 - [ ] Prometheus metrics + Grafana alerting live
 - [ ] Cost per pipeline ≤ $0.30 verified in test runs
