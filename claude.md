@@ -1,8 +1,14 @@
-# DataMind AI - Claude Project Instructions
+# DataMind AI — Claude Project Instructions
+
+**Tech Stack**: Google Gemini 3.5 Flash | Supabase (Storage + DB + Vector/pgvector) | FastAPI BackgroundTasks | PostgreSQL | Python stdlib | Next.js 14
+
+---
 
 ## Project Overview
 
 DataMind AI is an agentic data intelligence platform that transforms raw business data into clean, contextual dashboards and actionable business decisions without requiring SQL or Python knowledge. The platform treats data preparation, analysis, and decision support as one continuous, agent-driven workflow that is explicitly aware of the user's business domain.
+
+Built around four deliberate principles: (1) domain-first approach — ask users what domain they work in so all downstream agents apply domain-appropriate vocabulary, KPIs, and validation rules; (2) user-controlled data modeling — accept single or multiple files and let the user decide how files are merged; (3) human-in-the-loop cleaning — never run data cleaning silently, every step proposed, user approves/modifies/rejects; (4) type-aware storage routing — numeric/structured columns to PostgreSQL, free-text columns to Supabase Vector (pgvector).
 
 ---
 
@@ -11,12 +17,9 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 ### Four Foundational Design Principles
 
 1. **Domain-first approach**: Always ask users what domain they work in (Finance, Healthcare, Retail, Marketing, Operations, or Other) so all downstream agents apply domain-appropriate vocabulary, KPIs, and validation rules
-
 2. **User-controlled data modeling**: Accept single or multiple files (CSV, XLSX, JSON, Parquet) and let the user decide how files should be merged or modeled
-
 3. **Human-in-the-loop (HITL) cleaning**: Never run data cleaning silently — every cleaning step is proposed as a plan, the user approves/modifies/rejects each action, and only then does the agent execute
-
-4. **Type-aware storage routing**: Route data by type — numeric/structured columns to relational stores, free-text columns to vector stores — so analysis uses the right tool for each kind of question
+4. **Type-aware storage routing**: Route data by type — numeric/structured columns to PostgreSQL, free-text columns to Supabase Vector (pgvector) via pgvector — so analysis uses the right tool for each kind of question
 
 ---
 
@@ -33,50 +36,73 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 
 ### Domain Categories
 
-- **Finance**: revenue, COGS, gross margin, churn, MRR/ARR, runway
-- **Healthcare**: patient counts, readmission rate, length of stay, ICD-10/CPT codes
-- **Retail/eCommerce**: AOV, repeat purchase, SKU margin, inventory turn
-- **Marketing**: CTR, CPA, CAC, LTV, attribution windows
-- **Operations**: throughput, cycle time, generic counts
-- **Other**: with free-text descriptor
+- **Finance**: revenue, COGS, gross margin, churn, MRR/ARR, runway, AR aging, cohort retention
+- **Healthcare**: patient counts, episode of care, readmission rate, length of stay, ICD-10/CPT codes
+- **Retail/eCommerce**: AOV, repeat purchase, SKU margin, inventory turn, return rate, channel attribution
+- **Marketing**: CTR, CPA, CAC, LTV, attribution windows, channel mix
+- **Operations**: throughput, cycle time, generic counts, sums-and-rates
+- **Other**: free-text descriptor
 
 ---
 
 ## Technical Architecture
 
-### Technology Stack
+| Layer | Phase 1 Technology | Responsibility |
+|-------|-------------------|----------------|
+| Presentation — User UI | Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, Recharts | Domain selection, file upload, validation/merge UI, HITL cleaning review, intent capture, dashboard, audit view |
+| Presentation — Admin UI | Next.js (route group /admin/*, RBAC-gated), shadcn/ui, Recharts | User management, LLM/domain config, system health, audit log, domain pack viewer |
+| API Gateway | Python 3.11+, FastAPI, Pydantic v2, JWT auth, RBAC middleware | REST API, request validation, async job dispatch, role enforcement |
+| Agent Orchestration | LangGraph (supervisor pattern), Pydantic-validated outputs | Multi-agent pipeline coordination, state machine, retry, HITL gates |
+| LLM Provider Layer | LiteLLM-compatible abstraction; Google Gemini 3.5 Flash | Per-tenant model config; per-agent routing; cost & latency tracking |
+| Ingestion / Conversion | openpyxl, python-magic, chardet, Python stdlib (csv, json) | Format detection, parsing, multi-file merge planning, JSON normalisation, type-routing classification |
+| Layer 1 — Raw Storage | Supabase Storage (versioned bucket, per-user prefix) | Immutable source-of-truth for every uploaded file |
+| Layer 2 — JSON Storage | Supabase Storage (JSON prefix) + Supabase Database (PostgreSQL) | Cleaned, queryable JSON data; typed tables for SQL |
+| Layer 3 — Numeric/Structured | PostgreSQL | SQL queries, aggregates over numeric/structured columns |
+| Layer 4 — Textual/Vector | Supabase Vector (pgvector) on PostgreSQL | Embeddings for free-text columns; semantic search |
+| Metadata Store | Supabase Database (PostgreSQL) | Users, roles, datasets, jobs, HITL decisions, audit, billing meters |
+| Job Queue | FastAPI BackgroundTasks (P1); dedicated worker pool (P2) | Async pipeline execution |
+| Payments (P2) | Stripe | Plan tiers, usage-based charges, invoices, dunning |
+| Observability | Structured logs → Prometheus/Grafana | Logs, metrics |
 
-| Layer | Technology |
-|-------|------------|
-| Frontend - User UI | Next.js 14, TypeScript, Tailwind CSS, shadcn/ui, Recharts |
-| Frontend - Admin UI | Next.js (route group /admin/*), RBAC-gated |
-| API Gateway | Python 3.11+, FastAPI, Pydantic v2, JWT auth |
-| Agent Orchestration | LangGraph (supervisor pattern), Pydantic-validated outputs |
-| LLM Provider Layer | LiteLLM-compatible abstraction; Mistral + Moonshot Kimi (Phase 1) |
-| Raw Storage (Layer 1) | Supabase Storage (versioned bucket, per-user prefix) |
-| Curated Storage (Layer 2) | Supabase Storage, Apache Parquet format |
-| Numeric/Structured (Layer 3) | Supabase Database (PostgreSQL) + DuckDB |
-| Textual/Vector (Layer 4) | Weaviate |
-| Metadata Store | Supabase Database (PostgreSQL) |
-| Job Queue | Celery + Redis (Phase 1); Redis Streams + Celery workers (Phase 2) |
-| Container Registry | GitHub Container Registry (GHCR) |
-| Secrets | Supabase Vault |
-| Observability | Prometheus + Grafana (metrics/alerts); Grafana Tempo (traces, P2) |
+### LLM Provider Abstraction
+
+All LLM calls go through a LiteLLM-compatible abstraction layer. Agents are model-agnostic. Admin controls default provider+model per tenant and can override per agent (e.g., cheaper model for profiling, frontier model for narrative).
+
+| Concern | Handling |
+|---------|----------|
+| Provider list | P1: Google Gemini 3.5 Flash. P2: additional LiteLLM-compatible providers as needed |
+| Per-agent routing | Admin sets per-agent {provider, model} in Admin UI |
+| Output schema enforcement | All agents return Pydantic-validated JSON, provider-agnostic |
+| Cost & latency tracking | Every call records tokens, cost, latency → metrics store |
+| Secrets | Provider API keys in Supabase Vault, retrieved per tenant |
+
+---
+
+## Storage Architecture
 
 ### Four-Layer Storage Architecture
 
-1. **Layer 1 (Raw)**: Supabase Storage bucket with versioning — original files preserved unmodified
-2. **Layer 2 (Curated)**: Supabase Storage bucket with cleaned data in Apache Parquet format
-3. **Layer 3 (Numeric/Structured)**: Supabase Database (PostgreSQL) for numeric, boolean, datetime, and low-cardinality categorical data; DuckDB for fast in-process analytical queries
-4. **Layer 4 (Textual/Semantic)**: Weaviate for vector embeddings of free-text columns (HNSW index, cosine similarity)
+| Layer | Service | Content | Access |
+|-------|---------|---------|--------|
+| Layer 1 — Raw | Supabase Storage (versioned) | Original uploaded files, unmodified | Archive URI in dataset record |
+| Layer 2 — JSON | Supabase Storage + PostgreSQL | JSON normalised data + typed PostgreSQL tables | All agents operate on JSON; SQL on typed tables |
+| Layer 3 — Numeric/Structured | PostgreSQL | Numeric, boolean, datetime, low-cardinality categorical columns | SQL queries |
+| Layer 4 — Textual/Semantic | Supabase Vector (pgvector) | Vector embeddings of free-text columns | Semantic search (cosine similarity, HNSW index) |
 
 ### Data Type Classification Rules
 
 | Class | Detection Rule | Storage Path |
 |-------|----------------|--------------|
-| Numeric/Structured | int/float/bool/date dtype, or low-cardinality categorical (≤50 distinct values) | Supabase Database + Parquet |
-| Textual/Semantic | String with avg length >40 chars or distinct count >50% of rows | Weaviate + Parquet |
+| Numeric/Structured | int/float/bool/date dtype, or low-cardinality categorical (≤50 distinct values) | PostgreSQL + JSON metadata |
+| Textual/Semantic | String with avg length >40 chars or distinct count >50% of rows | pgvector embeddings + JSON metadata |
 | Ambiguous | Does not fit above rules | Surfaced in HITL #1 for user decision |
+
+### File Processing Pipeline
+
+1. Upload any format (CSV, XLSX, JSON, Parquet) → archive original to `supabase://datamind-archive/{user_id}/{dataset_id}/{timestamp}/{filename}`
+2. Convert to JSON → agents operate on JSON from `supabase://datamind-json/{user_id}/{dataset_id}/v{version}/data.json`
+3. Structured columns also dumped to typed PostgreSQL tables for SQL queries
+4. Textual columns → embeddings → Supabase Vector (pgvector) for semantic search
 
 ---
 
@@ -88,13 +114,13 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 |-------|------|-------|
 | Supervisor | Orchestrates pipeline; routes, retries, aggregates; enforces HITL gates | P1 |
 | Domain | Loads domain prompt pack and exposes it to all downstream agents | P1 |
-| Ingestion | Detects format, parses, profiles, classifies columns, drafts merge plan | P1 |
-| Cleaning Plan | Drafts numbered cleaning plan with rationale + confidence. Does NOT execute. | P1 |
+| Ingestion | Detects format, parses, profiles, classifies columns, drafts merge plan for multi-file | P1 |
+| Cleaning Plan | Drafts numbered cleaning plan with rationale + confidence per step. Does NOT execute. | P1 |
 | Cleaning Executor | Executes only user-approved steps, logs each action | P1 |
 | Intent | Parses user's natural-language goal into structured analysis spec | P1 |
-| Analysis | Runs SQL on Supabase Database/DuckDB for numeric; semantic search on Weaviate for textual | P1 |
-| Dashboard | Converts analysis results into Vega-Lite specs | P1 |
-| Insights | Generates domain-flavored narrative + recommended next action | P1 |
+| Analysis | Runs SQL on PostgreSQL for numeric; semantic search on pgvector for textual | P1 |
+| Dashboard | Converts analysis results into Vega-Lite specs (2-3 KPI cards + 2 charts) | P1 |
+| Insights | Generates domain-flavoured narrative + recommended next action | P1 |
 | Outlier (advanced) | Flags statistical outliers; recommends keep/clip/remove | P2 |
 | Fuzzy Dedup | Detects near-duplicate rows using fuzzy string match | P2 |
 | Smart Imputation | KNN imputation; LLM-assisted for high-cardinality categoricals | P2 |
@@ -102,12 +128,12 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 
 ### HITL Checkpoints
 
-| Checkpoint | What User Sees | User Actions |
-|------------|----------------|--------------|
+| # | What User Sees | User Actions |
+|---|----------------|--------------|
 | #1 Schema & Merge Validation | Inferred schema per file, proposed type-routing, proposed merge plan | Approve, change merge key, change type-routing, exclude column/file |
-| #2 Cleaning Plan Approval | Numbered list of proposed cleaning actions with rationale and confidence | Approve all, approve some, modify steps, reject |
+| #2 Cleaning Plan Approval | Numbered list of proposed cleaning actions with rationale + confidence | Approve all, approve some, modify steps, reject |
 | #3 Intent Confirmation | Restated interpretation of user's question | Approve, refine intent |
-| #4 Dashboard Accept/Refine | Generated dashboard with feedback options | Accept, request changes, ask follow-up (P2) |
+| #4 Dashboard Accept/Refine (P2) | Generated dashboard with feedback options | Accept, request changes, ask follow-up |
 
 ### Confidence Score Framework
 
@@ -123,16 +149,16 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 ## Data Flow
 
 1. **Domain**: User picks domain; Domain Agent loads matching prompt pack
-2. **Upload**: User drags files into UI; files upload directly to Layer 1 (Supabase Storage)
-3. **Detect & Profile**: Ingestion Agent inspects files, classifies columns
-4. **HITL #1**: User confirms schema, merge plan, type-routing
-5. **Cleaning Plan**: Cleaning Agent generates numbered plan (no execution)
-6. **HITL #2**: User reviews and approves/modifies cleaning steps
-7. **Execute & Route**: Approved cleaning runs; data routes to appropriate storage layers
-8. **Intent**: User states question; Intent Agent embeds and matches against schema
-9. **Analyze**: Analysis Agent runs SQL or semantic search as appropriate
-10. **Dashboard**: Dashboard Agent generates Vega-Lite chart specs
-11. **Insight**: Insights Agent generates narrative and recommended action
+2. **Upload**: User drags files into UI; files upload directly to Layer 1 (Supabase Storage archive bucket)
+3. **Detect & Profile**: Ingestion Agent inspects files (mime + content sniff), reports format, parses sample rows, classifies each column as numeric/structured or textual
+4. **HITL #1 — Validate & Merge**: User sees inferred schema, proposed merge plan (union/join + key), proposed type-routing per column. User confirms or overrides before cleaning runs
+5. **Cleaning Plan**: Cleaning Agent generates numbered plan (dedup, imputation, type coercion, outlier flags) with rationale + confidence per step. Nothing executes
+6. **HITL #2 — Approve Cleaning**: User reviews plan, approves/modifies/excludes steps, submits. Audit log records decisions
+7. **Execute & Route**: Approved cleaning runs. Cleaned data written to Layer 2 (JSON). Numeric/structured columns loaded into PostgreSQL typed tables; textual columns embedded into pgvector
+8. **Intent Capture (HITL #3)**: Domain-tuned suggestion chips shown. Intent Agent embeds user's question and matches against schema. Restatement displayed for user confirmation
+9. **Analyze**: Analysis Agent runs SQL on PostgreSQL for numeric questions, semantic search on pgvector for textual, combined queries when needed
+10. **Dashboard**: Dashboard Agent generates Vega-Lite chart specs. Renders in User UI
+11. **Insight**: Insights Agent generates short domain-flavoured narrative and recommended next action
 
 ---
 
@@ -155,28 +181,29 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 - User confirms or overrides before cleaning
 
 ### F1c — Type-Aware Storage Routing
-- Automatic classification of columns
-- Routing to Supabase Database/DuckDB (numeric) or Weaviate (textual) based on type
+- Automatic classification of columns as numeric/structured or textual
+- Routing to PostgreSQL (numeric) or pgvector (textual)
 - Ambiguous columns flagged for user decision
 
-### F2 — Two-Layer Storage
-- Layer 1: Original files preserved unmodified in Supabase Storage
-- Layer 2: Cleaned data in Apache Parquet on Supabase Storage
+### F2 — JSON-Normalised Storage with Original Archiving
+- Original files archived unmodified in Supabase Storage (Layer 1)
+- All files normalised to JSON for processing (Layer 2)
+- Structured data also dumped into typed PostgreSQL tables
 
-### F3 — HITL Cleaning
-- **Plan phase**: Agent generates numbered list of proposed actions
+### F3 — HITL Cleaning (Plan → Approve → Execute)
+- **Plan phase**: Agent generates numbered list of proposed actions with rationale + confidence
 - **Approve phase**: User reviews, approves/modifies/rejects
 - **Execute phase**: Only approved steps run
 - Operations: exact dedup, missing-value imputation, type coercion, basic outlier flagging
 
 ### F4 — Intent Capture (HITL #3)
-- Free-text input: "What are you trying to learn?"
+- Free-text input: "What are you trying to learn from this data?"
 - Domain-tuned suggestion chips
 - Intent Agent restates interpretation for user confirmation
 
 ### F5 — Dashboard Generation
-- 2–3 KPI cards plus 2 charts (line, bar, table)
-- Domain-flavored narrative from Insights Agent
+- 2-3 KPI cards plus 2 charts (line, bar, table)
+- Domain-flavoured narrative from Insights Agent
 - Rendered within 90 seconds
 
 ### F6 — Audit Log and Lineage
@@ -190,37 +217,9 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 
 ### F12 — Configurable LLM Provider
 - LiteLLM-compatible abstraction
-- Phase 1: Mistral (mistral-small, mistral-7b-instruct) + Moonshot Kimi (kimi-k2, moonshot-v1)
+- Phase 1: Google Gemini 3.5 Flash
 - Per-tenant defaults with per-agent overrides
 - Cost and latency tracking per provider/agent
-
----
-
-## Phase 2 Additions
-
-- Advanced cleaning: fuzzy dedup, KNN imputation, LLM-assisted imputation, outlier handling
-- Additional LLM providers: Google Gemini Flash, Groq (Llama 3), Ollama (self-hosted)
-- PII Detection Agent
-- Iterative Q&A on same dataset
-- Project/workspace organization
-- Public REST API
-- Stripe-backed monetization (Free/Pro/Team/Enterprise tiers)
-- Domain pack editor (full editing vs. read-only in P1)
-
----
-
-## Performance Targets
-
-| Metric | Phase 1 Target | Phase 2 Target |
-|--------|----------------|----------------|
-| Time to First Insight (single file) | < 7 min | < 5 min |
-| Time to First Insight (multi-file) | < 12 min | < 8 min |
-| Pipeline Success Rate | ≥ 70% | ≥ 85% |
-| Cleaning Plan Acceptance | ≥ 75% | ≥ 85% |
-| HITL Cycle Time | < 90s | < 60s |
-| Dashboard Latency (p95) | < 90s | < 60s |
-| Cost per Pipeline | ≤ $0.30 | ≤ $0.15 |
-| LLM Provider Portability | ≥ 2 providers | ≥ 4 providers |
 
 ---
 
@@ -233,8 +232,8 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 | POST | /api/v1/auth/signup | Create account |
 | POST | /api/v1/auth/login | Issue JWT |
 | PATCH | /api/v1/me/domain | Update active domain |
-| POST | /api/v1/datasets/upload-url | Get presigned Supabase Storage URLs |
-| POST | /api/v1/datasets/{id}/ingest | Trigger format detection |
+| POST | /api/v1/datasets/upload-url | Get presigned upload URLs |
+| POST | /api/v1/datasets/{id}/ingest | Trigger format detection + JSON normalisation |
 | GET | /api/v1/datasets/{id}/merge-plan | Get HITL #1 data |
 | POST | /api/v1/datasets/{id}/merge-plan/decision | Submit HITL #1 decision |
 | GET | /api/v1/datasets/{id}/cleaning-plan | Get HITL #2 data |
@@ -269,7 +268,7 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 - Argon2 password hashing
 - RBAC with two roles: user, admin
 - Per-user prefix isolation in Supabase Storage
-- Encryption at rest: AES-256 (Supabase managed, P1 + P2)
+- Encryption at rest: AES-256 (Supabase managed)
 - Encryption in transit: TLS 1.3 minimum
 - Secrets in Supabase Vault
 - Input sanitization on all user-supplied strings
@@ -288,7 +287,7 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 - **Prompt-injection defense**: User data in delimited blocks with explicit framing
 - **SQL validation**: Generated SQL parsed and validated as read-only
 - **Token/cost ceilings**: Per-pipeline budget caps total LLM tokens
-- **Reversibility**: No destructive operation on user data is permanent
+- **Reversibility**: No destructive operation on user data is permanent (Layer 1 preserved)
 
 ### Bias Mitigation
 
@@ -304,101 +303,16 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 
 ---
 
-## Domain Prompt Packs
+## Phase 2 Additions
 
-Each pack includes: domain vocabulary, common KPI definitions, sample-question library, validation rules, chart-type preferences.
-
-### Finance Pack
-- **KPIs**: revenue, COGS, gross margin, churn, MRR/ARR, runway, AR aging, cohort retention
-- **Validation**: dates as fiscal periods, currency normalization
-
-### Healthcare Pack
-- **KPIs**: patient counts, episode of care, readmission rate, length of stay
-- **Recognition**: ICD-10/CPT codes
-- **Validation**: PHI detection cues
-
-### Retail/eCommerce Pack
-- **KPIs**: AOV, repeat purchase, SKU margin, inventory turn, return rate, channel attribution
-- **Validation**: SKU duplicates, negative quantities
-
-### Marketing Pack
-- **KPIs**: CTR, CPA, CAC, LTV, attribution windows, channel mix
-- **Validation**: UTM hygiene, date-window alignment
-
-### Operations/Other Pack
-- **KPIs**: generic counts, throughput, cycle time, sums-and-rates
-- **Validation**: No domain-specific validators
-
----
-
-## UI/UX Requirements
-
-### Design Principles
-
-1. **Progressive disclosure**: Show only what's needed at current step
-2. **Confidence transparency**: Every agent action shows confidence indicator
-3. **HITL as first-class affordance**: Full pages, not afterthought modals
-4. **Domain-aware copy**: Use vocabulary from active domain pack
-5. **Fail loudly, fail clearly**: Specific, actionable error states
-6. **Don't punish exploration**: Nothing destroys data
-
-### Visual Distinction
-
-- **User UI**: Cool blue accent
-- **Admin UI**: Warm orange-tinted accent
-- **HITL screens**: Yellow/orange affordance band
-
-### Key User UI Screens
-
-- U1: Sign-up / Sign-in
-- U2: Domain Selection (first-run)
-- U3: Upload Screen (single or multi-file)
-- U4: Schema & Merge Validation (HITL #1)
-- U5: HITL Cleaning Plan Review (HITL #2)
-- U6: Intent Capture (HITL #3)
-- U7: Dashboard View
-- U8: Audit Log View
-
-### Key Admin UI Screens
-
-- A1: Admin Home (System Health)
-- A2: User & Role Management
-- A3: LLM Provider Configuration
-- A4: Domain Prompt Pack Viewer (P1) / Editor (P2)
-- A5: Audit Log Viewer
-- A6: Billing & Plans (P2)
-
-### Accessibility
-
-- WCAG 2.1 AA compliance target
-- Keyboard navigation fully supported
-- Color contrast ≥ 4.5:1
-- Charts include accessible alt-text and data-table fallback
-
----
-
-## Testing Strategy
-
-### Test Layers
-
-| Layer | Scope | Coverage Target |
-|-------|-------|-----------------|
-| Unit | Agent functions, transform logic, API handlers | ≥ 70% (P1), ≥ 85% (P2) |
-| Integration | Agent-to-agent, Supabase Storage, DuckDB, Weaviate | Happy paths + key errors |
-| E2E (single-file) | Upload → HITL #1 → HITL #2 → dashboard per format | All formats |
-| E2E (multi-file) | 2-file and 5-file uploads with union/join | Union + Join paths |
-| HITL Flow | All decision branches per gate | Complete |
-| RBAC | Admin endpoint protection | Full matrix |
-| LLM Portability | Each agent on each provider | All configured providers |
-| Agent Evaluation | Cleaning acceptance on golden datasets | ≥ 75% (P1), ≥ 85% (P2) |
-| Domain Regression | Per-domain prompt-pack output validation | 4 domains × 5 fixtures |
-
-### Golden Dataset
-
-- 10 datasets in Phase 1, 20+ in Phase 2
-- Known data-quality issues, expected outcomes, labeled correct cleaning decisions
-- Run nightly against all configured LLM providers
-- Includes: Stripe export, Salesforce export, survey CSV, finance Excel, IoT JSON, Shopify exports (union/join), multi-sheet Excel, Parquet, edge cases
+- Advanced cleaning: fuzzy dedup, KNN imputation, LLM-assisted imputation, outlier handling
+- Additional LLM providers: additional LiteLLM-compatible providers as needed
+- PII Detection Agent
+- Iterative Q&A on same dataset
+- Project/workspace organization
+- Public REST API
+- Stripe-backed monetization (Free/Pro/Team/Enterprise tiers)
+- Domain pack editor (read-only viewer in P1 → full editing in P2)
 
 ---
 
@@ -410,7 +324,7 @@ Each pack includes: domain vocabulary, common KPI definitions, sample-question l
 |------|-------|---------------|
 | Week 1 | Foundation: Supabase setup + Terraform, CI/CD, Postgres schema, FastAPI, Next.js shell, auth, LLM abstraction | User can sign up, log in, hit /health. CI/CD deploys to staging. |
 | Week 2 | Domain selection, multi-file upload, format detection, HITL #1 | Domain persists. Multi-file upload works. HITL #1 renders. |
-| Week 3 | Parquet conversion, type-routing, cleaning plan agent, HITL #2, cleaning executor | Cleaning plan generated. ≥60% acceptance on golden datasets 1-5. |
+| Week 3 | JSON normalisation, type-routing, cleaning plan agent, HITL #2, cleaning executor | Cleaning plan generated. ≥60% acceptance on golden datasets 1-5. |
 | Week 4 | Intent agent, analysis agent, dashboard agent, insights agent | End-to-end happy path for CSV and Parquet merge. |
 | Week 5 | Admin UI, integration testing, golden dataset validation, hardening | Internal beta with 5 users for one week. |
 
@@ -419,16 +333,16 @@ Each pack includes: domain vocabulary, common KPI definitions, sample-question l
 | Week | Focus |
 |------|-------|
 | Week 6 | Advanced cleaning agents, PII detection, XML/PDF ingestion |
-| Week 7 | LLM provider expansion (Gemini Flash, Groq, Ollama), domain pack editor, new domain packs |
+| Week 7 | LLM provider expansion, domain pack editor, new domain packs |
 | Week 8 | Iterative Q&A, expanded charts, public REST API, project organization |
-| Week 9 | Stripe monetization, OpenTelemetry tracing, auto-scaling Celery workers, Supabase Database Multi-AZ |
+| Week 9 | Stripe monetization, OpenTelemetry tracing, auto-scaling background workers |
 | Week 10 | Closed beta launch (20-30 users), bug fixes, documentation |
 
 ### Scope Cut Priority (Phase 1)
 
 If timeline slips, cut in this order:
 1. Drop Parquet input
-2. Drop two domains (keep Finance + Retail)
+2. Drop two domains
 3. Drop second LLM provider
 4. Drop JSON ingestion
 5. Drop XLSX
@@ -437,42 +351,76 @@ If timeline slips, cut in this order:
 
 ---
 
-## Business Model
+## Performance Targets
 
-### Pricing Tiers (Phase 2)
+| Metric | Phase 1 Target | Phase 2 Target |
+|--------|----------------|----------------|
+| Time to First Insight (single file) | < 7 min | < 5 min |
+| Time to First Insight (multi-file) | < 12 min | < 8 min |
+| Pipeline Success Rate | ≥ 70% | ≥ 85% |
+| Cleaning Plan Acceptance | ≥ 75% | ≥ 85% |
+| HITL Cycle Time | < 90s | < 60s |
+| Dashboard Latency (p95) | < 90s | < 60s |
+| Cost per Pipeline | ≤ $0.30 | ≤ $0.15 |
+| LLM Providers | Google Gemini 3.5 Flash | Additional as needed |
 
-| Tier | Price | Pipelines/Month | Storage | Features |
-|------|-------|-----------------|---------|----------|
-| Free | $0 | 10 | 1 GB | Single user, basic cleaning |
-| Pro | ~$29/mo | 50 | 10 GB | Advanced cleaning, priority support |
-| Team | ~$99/mo | 250 | 50 GB | Multi-user, admin console |
-| Enterprise | Custom | Unlimited | Custom | SSO, SLA, dedicated support |
+## Database Schema (Core Tables)
 
-### Cost Targets
+### users
+- user_id (UUID PK), tenant_id (FK→tenants), email (UNIQUE), password_hash, role (user/admin), active_domain (finance/healthcare/retail/marketing/operations/other), created_at
 
-| Cost Driver | Phase 1 | Phase 2 | Year 1 Target |
-|-------------|---------|---------|---------------|
-| LLM cost per pipeline | ≤ $0.30 | ≤ $0.15 | ≤ $0.08 |
-| Infra cost per pipeline | ≤ $0.05 | ≤ $0.02 | ≤ $0.01 |
-| Target gross margin | — | ~90% | ≥ 75% |
+### datasets
+- dataset_id (UUID PK), user_id (FK), original_filenames (TEXT[]), detected_format (csv/xlsx/json/parquet), file_count, merge_strategy (single/union/join/separate), merge_key_column, archive_uris, json_uri, row_count_raw, row_count_clean, status (state machine), created_at/updated_at
+
+### hitl_decisions
+- decision_id (UUID PK), dataset_id (FK), user_id (FK), checkpoint (schema_merge/cleaning_plan/intent/dashboard_accept), proposal_json (JSONB), decision_json (JSONB), latency_seconds, created_at
+
+### pipeline_runs
+- run_id (UUID PK), dataset_id (FK), status (queued/running/paused_for_hitl/complete/failed), started_at, completed_at, error_summary, audit_log_uri, llm_provider, total_llm_tokens, total_llm_cost_usd
+
+### llm_provider_config
+- config_id (UUID PK), tenant_id (FK), default_provider, default_model, per_agent_overrides (JSONB), secrets_vault_path
+
+---
+
+## Development
+
+### Prerequisites
+
+- Python 3.11+
+- Node.js 20+
+- Docker Desktop
+- pnpm
+
+### Local Setup
+
+```bash
+# Start local dependencies
+docker compose up -d
+
+# Backend
+cd backend
+uv venv && source .venv/bin/activate
+uv pip install -r requirements.txt
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload
+
+# Frontend
+cd frontend
+pnpm install
+pnpm dev
+```
 
 ---
 
 ## Key Constraints
 
-### File Limits (Phase 1)
-
-- 50 MB per file
-- 250 MB total per upload
-- 10 files maximum per upload
+- 50 MB per file, 250 MB total per upload, 10 files maximum per upload
 - Same format required within single upload
-- 5 GB storage per user
-- 20 datasets per user
-
-### Supported Formats
-
-- **Phase 1**: CSV, XLSX, JSON, Parquet
-- **Phase 2**: +XML, PDF (text extraction)
+- 5 GB storage per user, 20 datasets per user
+- Supported formats: CSV, XLSX, JSON, Parquet (P1)
+- No streaming data, no native mobile, no on-prem, no custom ML training
+- No write-back to source systems
 
 ### Permanently Out of Scope
 
@@ -484,47 +432,6 @@ If timeline slips, cut in this order:
 
 ---
 
-## Monitoring and Observability
-
-### Key Metrics
-
-- `pipeline_duration_seconds` (by stage, excluding HITL wait)
-- `hitl_decision_latency_seconds` (by checkpoint)
-- `hitl_approval_rate` (by checkpoint, by domain)
-- `agent_confidence` (by agent type, by domain)
-- `cleaning_rows_changed_total` (by action type, by HITL outcome)
-- `llm_tokens_used` (by agent, provider, model)
-- `llm_cost_usd` (by agent, provider, model)
-- `llm_provider_error_rate` (by provider)
-- `type_routing_distribution` (numeric/textual/ambiguous)
-
-### Alerting Conditions
-
-| Condition | Severity |
-|-----------|----------|
-| Job failure rate > 5% over 15 min | Page |
-| API p95 latency > 2s for 5 min | Page |
-| Supabase Storage write failure | Page |
-| LLM error rate > 10% over 15 min | Page |
-| HITL pause queue depth > 100 | Page |
-| Daily LLM spend > 130% of 7-day average | Email |
-| Confidence score average < 0.6 over 24h | Email |
-
----
-
-## Open Questions (Target: 12 May 2026)
-
-| # | Question | Owner |
-|---|----------|-------|
-| OQ-01 | Final scope-cut sequence order | Product |
-| OQ-02 | Which four domains ship full prompt packs in P1 | Product + Domain SMEs |
-| OQ-03 | Second LLM provider confirmation (Mistral vs Moonshot Kimi default routing) | Engineering |
-| OQ-04 | Default per-agent model routing (cheaper model for profiling, capable for insights) | Engineering |
-| OQ-05 | Embedding model selection strategy for Weaviate | Engineering + AI |
-| OQ-06 | Audit log WORM requirement timing | Legal + Product |
-
----
-
 ## Definition of Done (Phase 1)
 
 - [ ] End-to-end pipeline works for CSV, XLSX, JSON, Parquet
@@ -532,22 +439,8 @@ If timeline slips, cut in this order:
 - [ ] HITL #1 + HITL #2 cycle time < 90s median
 - [ ] Audit log present for every agent and HITL decision
 - [ ] Four-layer storage architecture operational
-- [ ] LLM Provider Abstraction live with 2 providers (Mistral + Moonshot Kimi)
+- [ ] LLM Provider Abstraction live with Google Gemini 3.5 Flash
 - [ ] Dual UI shipped with server-side RBAC enforcement
 - [ ] CI/CD pipeline shipping to staging and prod
 - [ ] Internal beta with 5 users for one week
 - [ ] All Phase 1 NFR targets met
-
----
-
-## Definition of Done (Phase 2)
-
-- [ ] All Phase 2 features shipped
-- [ ] Cleaning Plan acceptance ≥ 85% on 20+ dataset golden set
-- [ ] HITL cycle time < 60s median
-- [ ] Public API live and documented
-- [ ] Closed beta with 20-30 external users
-- [ ] Stripe billing end-to-end operational
-- [ ] Auto-scaling handles 1,000 concurrent pipelines
-- [ ] ≥ 4 LLM providers operational with failover
-- [ ] NPS ≥ 40 from beta survey

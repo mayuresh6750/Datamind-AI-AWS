@@ -22,13 +22,13 @@ DataMind AI is an agentic data intelligence platform that takes a business user 
 | Layer | Technology |
 |-------|------------|
 | Frontend | Next.js 14, TypeScript, Tailwind CSS, shadcn/ui, Recharts |
-| Backend | Python 3.11+, FastAPI, Pydantic v2, Celery + Redis |
+| Backend | Python 3.11+, FastAPI, Pydantic v2, FastAPI BackgroundTasks |
 | Agent Orchestration | LangGraph (supervisor pattern) |
-| LLM Provider | LiteLLM abstraction; Mistral + Moonshot Kimi (Phase 1) |
+| LLM Provider | LiteLLM abstraction; Google Gemini 3.5 Flash (Phase 1) |
 | Layer 1 — Raw Storage | Supabase Storage (versioned, per-user prefix) |
-| Layer 2 — Curated Storage | Supabase Storage, Apache Parquet |
-| Layer 3 — Numeric/Structured | Supabase Database (PostgreSQL) + DuckDB |
-| Layer 4 — Textual/Semantic | Weaviate (HNSW index, cosine similarity) |
+| Layer 2 — Curated Storage | Supabase Storage, JSON |
+| Layer 3 — Numeric/Structured | Supabase Database (PostgreSQL) + PostgreSQL |
+| Layer 4 — Textual/Semantic | Supabase Vector (pgvector, HNSW index) |
 | Secrets | Supabase Vault |
 | Observability | Prometheus + Grafana |
 | CI/CD | GitHub Actions |
@@ -43,9 +43,9 @@ DataMind AI is an agentic data intelligence platform that takes a business user 
 | Layer | Content | Engine |
 |-------|---------|--------|
 | Layer 1 | Original files (immutable) | Supabase Storage |
-| Layer 2 | Cleaned Parquet | Supabase Storage |
-| Layer 3 | Numeric, boolean, date, categorical | PostgreSQL + DuckDB |
-| Layer 4 | Free-text embeddings | Weaviate |
+| Layer 2 | Cleaned JSON (archive originals) | Supabase Storage + PostgreSQL |
+| Layer 3 | Numeric, boolean, date, categorical | PostgreSQL |
+| Layer 4 | Free-text embeddings | Supabase Vector (pgvector) |
 
 ### Agent System (Phase 1)
 
@@ -57,7 +57,7 @@ DataMind AI is an agentic data intelligence platform that takes a business user 
 | Cleaning Plan | Drafts numbered cleaning plan with rationale + confidence. Does NOT execute. |
 | Cleaning Executor | Executes only user-approved steps, logs each action |
 | Intent | Parses natural-language goal into structured analysis spec |
-| Analysis | Runs SQL on numeric data (DuckDB/Postgres); semantic search on text (Weaviate) |
+| Analysis | Runs SQL on numeric data (PostgreSQL/Postgres); semantic search on text (Supabase Vector (pgvector)) |
 | Dashboard | Converts analysis results into Vega-Lite specs (KPI cards + charts) |
 | Insights | Generates domain-flavored narrative + recommended next action |
 
@@ -85,28 +85,28 @@ Domain Selection → Upload → Detect & Profile → HITL #1 (Schema & Merge)
 
 ```
 DataMind-AI/
-├── backend/              # FastAPI application
-│   ├── app/
-│   │   ├── agents/       # LangGraph agents
-│   │   ├── api/v1/       # API endpoints (auth, datasets, dashboards, etc.)
-│   │   ├── core/         # Config, database, security, storage
-│   │   └── models/       # Pydantic/SQLAlchemy models
-│   ├── celery/           # Celery workers & tasks
-│   └── tests/            # Unit, integration, E2E tests
-├── frontend/             # Next.js 14 application
-│   ├── app/              # Routes (/app/* user UI, /admin/* admin UI)
-│   ├── components/       # Reusable UI components
-│   └── lib/              # API client, hooks, types
-├── infra/                # Terraform infrastructure
-│   └── terraform/
-├── docs/                 # Documentation
-│   ├── PRD.md            # Product Requirements Document
-│   ├── architecture.md   # Architecture overview
-│   ├── prompt.md         # Session prompt log
-│   └── ...
-├── claude.md             # Developer reference (API, security, testing, UI/UX)
-├── skills.md             # AI skill patterns
-└── README.md             # This file
+├── backend/    # FastAPI application
+│ ├── app/
+│ │ ├── agents/  # LangGraph agents
+│ │ ├── api/v1/  # API endpoints (auth, datasets, dashboards, etc.)
+│ │ ├── core/   # Config, database, security, storage
+│ │ └── models/  # Pydantic/SQLAlchemy models
+│ ├── workers/   # FastAPI BackgroundTasks handlers
+│ └── tests/   # Unit, integration, E2E tests
+├── frontend/    # Next.js 14 application
+│ ├── app/    # Routes (/app/* user UI, /admin/* admin UI)
+│ ├── components/  # Reusable UI components
+│ └── lib/    # API client, hooks, types
+├── infra/    # Terraform infrastructure
+│ └── terraform/
+├── docs/     # Documentation
+│ ├── PRD.md   # Product Requirements Document
+│ ├── architecture.md # Architecture overview
+│ ├── prompt.md   # Session prompt log
+│ └── ...
+├── claude.md    # Developer reference (API, security, testing, UI/UX)
+├── skills.md    # AI skill patterns
+└── README.md    # This file
 ```
 
 ---
@@ -132,7 +132,7 @@ DataMind-AI/
 | HITL Cycle Time | < 90s | < 60s |
 | Dashboard Latency (p95) | < 90s | < 60s |
 | Cost per Pipeline | ≤ $0.30 | ≤ $0.15 |
-| LLM Providers | ≥ 2 | ≥ 4 |
+| LLM Providers | Google Gemini 3.5 Flash | Additional as needed |
 
 ---
 
