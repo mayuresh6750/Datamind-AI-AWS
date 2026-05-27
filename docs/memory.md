@@ -150,7 +150,7 @@ Phase 2 adds: Education, Manufacturing, Real Estate; admin editor for packs.
 | L1 Raw | Supabase Storage (versioned bucket) | Original uploaded files — never modified | Immutable source-of-truth |
 | L2 Curated | Supabase Storage + Parquet | Cleaned/merged columnar data, versioned per cleaning run | PostgreSQL (P1 and P2, in-process) |
 | L3 Numeric/Structured | Supabase Database (PostgreSQL) + PostgreSQL | Numeric, bool, date, low-cardinality categorical columns | SQL aggregates and filters |
-| L4 Textual/Semantic | Supabase Vector (pgvector) | Vector embeddings for free-text columns (avg length > 40 chars OR cardinality > 50%) | Cosine similarity (HNSW) |
+| L4 Textual/Semantic | Supabase Vector (pgvector) | Vector embeddings via Qwen3-Embedding-0.6B for free-text columns (avg length > 40 chars OR cardinality > 50%) | Cosine similarity (HNSW) |
 | Metadata | Supabase Database (PostgreSQL) | users, datasets, pipeline_runs, hitl_decisions, llm_provider_config, audit, usage_meter | Standard SQL |
 
 **Column routing logic** (in order):
@@ -180,7 +180,9 @@ Phase 2 adds: Education, Manufacturing, Real Estate; admin editor for packs.
 | Layer | P1 Technology |
 |---|---|
 | Frontend | Next.js 14 (App Router) · TypeScript · Tailwind CSS · shadcn/ui · Recharts |
-| Backend API | Python 3.11+ · FastAPI · Pydantic v2 · JWT (HS256) · Argon2 |
+| Authentication | Supabase Auth (email/password, JWT session, email verification, refresh tokens) |
+| Backend API | Python 3.11+ · FastAPI · Pydantic v2 · Supabase Auth JWT validation |
+| Embeddings | Qwen3-Embedding-0.6B (sentence-transformers, self-hosted, 8K context, provider-neutral) |
 | Agent Orchestration | LangGraph (supervisor pattern) |
 | Ingestion/Parsing | · Python stdlib (csv, json) · openpyxl · python-magic · chardet |
 | LLM Abstraction | LiteLLM-compatible custom interface |
@@ -199,8 +201,8 @@ Phase 2 adds: Education, Manufacturing, Real Estate; admin editor for packs.
 
 ## Security Decisions
 
-- **JWT**: HS256, 1-hour access token, refresh token. Role claim embedded.
-- **RBAC**: `user` and `admin` roles in P1. Server-side enforcement — frontend hides admin nav but server is source of truth.
+- **Auth**: Supabase Auth — email/password sign-up/login, JWT session management, email verification, refresh token rotation. Password hashing managed internally by Supabase Auth; no password_hash column in custom users table.
+- **RBAC**: `user` and `admin` roles in P1. Role stored as Supabase Auth custom claim. Server-side enforcement — frontend hides admin nav but server is source of truth.
 - **Admin route isolation**: FastAPI middleware returns HTTP 403 for non-admin tokens on `/admin/*`. Not a frontend-only guard.
 - **Role demotion**: access tokens expire within 15 minutes of role change via refresh-token rotation.
 - **Supabase Storage isolation**: per-user prefix + signed URLs; backend is the only writer to archive bucket.

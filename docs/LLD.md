@@ -2,7 +2,7 @@
 
 **Version**: 1.0 (Phase 1)
 **Date**: May 2026
-**Stack**: Google Gemini 3.5 Flash | Supabase Vector (pgvector) | FastAPI BackgroundTasks | PostgreSQL | JSON
+**Stack**: Google Gemini 3.5 Flash | Supabase Auth | Supabase Vector (pgvector) | FastAPI BackgroundTasks | PostgreSQL | JSON | Qwen3-Embedding-0.6B
 
 ---
 
@@ -68,11 +68,12 @@
 ### 2.1 users
 
 ```sql
+-- Extends Supabase Auth's auth.users table with app-specific profile fields.
+-- Password management is handled entirely by Supabase Auth; no password_hash stored here.
 CREATE TABLE users (
-    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
     email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(20) NOT NULL DEFAULT 'user'
         CHECK (role IN ('user', 'admin')),
     active_domain VARCHAR(20) NOT NULL DEFAULT 'other'
@@ -233,7 +234,8 @@ CREATE INDEX idx_audit_created ON audit_log(created_at);
 
 - **Service**: Supabase Vector (pgvector) on PostgreSQL
 - **Index**: HNSW for cosine similarity
-- **Embedding model**: Google Gemini 3.5 Flash
+- **Embedding model**: Qwen3-Embedding-0.6B (sentence-transformers, self-hosted in FastAPI container, 8K context window, 1024 dimensions, provider-neutral)
+- **Install**: `pip install sentence-transformers` — no Ollama required
 - **Access**: Semantic search via Analysis Agent
 
 ---
@@ -379,8 +381,6 @@ class LLMProvider(Protocol):
         self, prompt: str, schema: type[BaseModel]
     ) -> BaseModel: ...
 
-    async def embed_text(self, text: str) -> list[float]: ...
-
 class GoogleGeminiProvider:
     def __init__(self, api_key: str, model: str = "gemini-3.5-flash"):
         self.api_key = api_key
@@ -390,9 +390,17 @@ class GoogleGeminiProvider:
         # Returns JSON matching the Pydantic schema
         ...
 
-    async def embed_text(self, text):
-        # Returns embedding vector
-        ...
+class EmbeddingModel:
+    """Qwen3-Embedding-0.6B via sentence-transformers — separate from LLM provider, provider-neutral."""
+    def __init__(self):
+        from sentence_transformers import SentenceTransformer
+        self.model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B")
+
+    def embed_text(self, text: str) -> list[float]:
+        return self.model.encode(text).tolist()
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return self.model.encode(texts).tolist()
 ```
 
 ---
@@ -461,7 +469,8 @@ DataMind-AI/
 | DATABASE_URL | Supabase Vault | - |
 | SUPABASE_URL | .env | http://localhost:54321 |
 | SUPABASE_SERVICE_KEY | Supabase Vault | - |
-| JWT_SIGNING_KEY | Supabase Vault | - |
+| SUPABASE_ANON_KEY | Supabase Vault | - |
+| SUPABASE_SERVICE_ROLE_KEY | Supabase Vault | - |
 | LLM_API_KEY | Supabase Vault | - |
 | LLM_MODEL | .env | gemini-3.5-flash |
 | STORAGE_ARCHIVE_BUCKET | .env | datamind-archive |
@@ -487,8 +496,8 @@ DataMind-AI/
 
 ## 12. Security Implementation
 
-- **Authentication**: JWT (HS256, 1-hour expiry, refresh tokens). Argon2 password hashing.
-- **RBAC**: Roles: `user`, `admin`. Enforced via FastAPI middleware on every endpoint.
+- **Authentication**: Supabase Auth — email/password, JWT session management, email verification, refresh token rotation. Password hashing managed internally by Supabase Auth; custom `users` table references `auth.users(id)`.
+- **RBAC**: Roles: `user`, `admin` stored as Supabase Auth custom claims. Enforced via FastAPI middleware on every endpoint.
 - **UI separation**: `/admin/*` blocked at API level for non-admin tokens (HTTP 403).
 - **Per-user prefix isolation**: Supabase Storage paths include `{user_id}`.
 - **Encryption at rest**: AES-256 (Supabase managed).

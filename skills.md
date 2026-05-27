@@ -352,7 +352,7 @@ def route_columns(data: dict[str, list]) -> dict[str, ColumnClass]:
 ```
 
 - `NUMERIC_STRUCTURED` → write to PostgreSQL typed table + JSON metadata
-- `TEXTUAL_SEMANTIC` → embed with tenant's embedding model → store in Supabase Vector (pgvector, HNSW index, per-tenant schema)
+- `TEXTUAL_SEMANTIC` → embed with Qwen3-Embedding-0.6B (sentence-transformers, self-hosted) → store in Supabase Vector (pgvector, HNSW index, per-tenant schema)
 - `AMBIGUOUS` → present to user at HITL #1; honour their choice
 
 ---
@@ -465,10 +465,10 @@ def validate_readonly_sql(sql: str, allowed_table: str) -> None:
 
 Full setup sequence for a DataMind-style platform:
 
-1. `db-architect` → design 4-layer storage schema: users, datasets, pipeline_runs, hitl_decisions, llm_provider_config; PostgreSQL + pgvector
-2. `backend-builder` → FastAPI with RBAC middleware, FastAPI BackgroundTasks job dispatch, LangGraph supervisor
+1. `db-architect` → design 4-layer storage schema: users (FK→auth.users), datasets, pipeline_runs, hitl_decisions, llm_provider_config; PostgreSQL + pgvector
+2. `backend-builder` → FastAPI with Supabase Auth JWT validation, RBAC middleware, FastAPI BackgroundTasks job dispatch, LangGraph supervisor
 3. `/guardrail-pipeline datamind ["user","admin"] ["datasets","hitl_decisions","audit_events"]`
-4. `frontend-builder` → Next.js dual UI (`/app/*` and `/admin/*`) with domain-aware components
-5. `api-integrator` → LiteLLM-compatible provider abstraction for Google Gemini 3.5 Flash (P1); API keys from Supabase Vault
+4. `frontend-builder` → Next.js dual UI (`/app/*` and `/admin/*`) with Supabase Auth SDK and domain-aware components
+5. `api-integrator` → LiteLLM-compatible provider abstraction for Google Gemini 3.5 Flash (P1); Qwen3-Embedding-0.6B (sentence-transformers) for embeddings; API keys from Supabase Vault
 6. `deployer` → Docker Compose + Supabase via Terraform; GitHub Actions CI/CD
-7. `security-auditor` → RBAC isolation tests, JWT role claim handling, prompt injection audit
+7. `security-auditor` → RBAC isolation tests, Supabase Auth JWT claim handling, prompt injection audit

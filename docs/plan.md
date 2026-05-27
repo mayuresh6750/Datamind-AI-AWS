@@ -15,7 +15,9 @@ Deliver a working, end-to-end, multi-file, multi-domain agentic data pipeline wi
 | Layer | Technology |
 |---|---|
 | Frontend (User + Admin UI) | Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, Recharts |
-| Backend / API Gateway | Python 3.11+, FastAPI, Pydantic v2, JWT auth, RBAC middleware |
+| Authentication | Supabase Auth (email/password, JWT session management, email verification, refresh tokens) |
+| Backend / API Gateway | Python 3.11+, FastAPI, Pydantic v2, Supabase Auth JWT validation, RBAC middleware |
+| Embeddings | Qwen3-Embedding-0.6B (sentence-transformers, self-hosted, 8K context, provider-neutral) |
 | Agent Orchestration | LangGraph (supervisor pattern), Pydantic-validated outputs |
 | LLM Provider Layer | LiteLLM-compatible abstraction — Google Gemini 3.5 Flash |
 | Ingestion / Conversion | Apache Arrow, Python stdlib (csv, json), openpyxl |
@@ -116,7 +118,7 @@ DataMind is a three-tier, cloud-native system:
 
 | Week | Focus | Key Deliverables |
 |---|---|---|
-| Week 1 (Days 1–5) | Foundation | Repo setup, CI/CD, auth (JWT + RBAC), DB schema, Supabase Storage buckets + Database, FastAPI BackgroundTasks+Redis wiring |
+| Week 1 (Days 1–5) | Foundation | Repo setup, CI/CD, Supabase Auth + RBAC, DB schema, Supabase Storage buckets + Database, FastAPI BackgroundTasks wiring |
 | Week 2 (Days 6–10) | Ingestion + Domain | File upload UI, format detection, multi-file merge plan, Domain Agent + 4 prompt packs |
 | Week 3 (Days 11–15) | HITL #1 + Cleaning | Schema/merge validation screen (HITL #1), Cleaning Plan Agent, confidence scoring |
 | Week 4 (Days 16–20) | HITL #2 + Storage routing | Cleaning plan review screen (HITL #2), Cleaning Executor, Supabase Database/PostgreSQL + Supabase Vector (pgvector) loading |

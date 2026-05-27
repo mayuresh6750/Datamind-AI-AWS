@@ -708,3 +708,202 @@ git push origin main --force
 > update the prompts which are not there in the log and push to docs folder in main
 
 **Interpreted intent**: Appended Prompts 11–19 to prompt.md covering all unlogged prompts from this session. Will copy to docs/ and push.
+
+---
+
+### Prompt 20 — Tech Stack Investigation: Auth and Embeddings (2026-05-27)
+
+**Raw**:
+> Can you please goto dev branch of my repo and confirm in techstack if Auth should be included? currently it is not included ..supabase comes with auth is that the reason it is not included separately in the techstack
+
+**Interpreted intent**: Reviewed all docs to determine whether auth was missing from the tech stack and why. Found that the original design used custom JWT + Argon2 password hashing (NOT Supabase Auth), evidenced by the `password_hash` column in the users table and custom `/auth/signup` + `/auth/login` endpoints. Recommended adding Auth explicitly to the tech stack as a separate row. User confirmed they would decide on auth approach.
+
+---
+
+### Prompt 21 — Embedding Model Investigation (2026-05-27)
+
+**Raw**:
+> also if you see my techstack there is no embeddings model mentioned ..is it ok like this?
+
+**Interpreted intent**: Audited all docs for embedding model references. Found PRD Open Question OQ-05 (unresolved, past due) about whether to use provider's default embedding endpoint or a neutral model. LLD.md incorrectly listed "Google Gemini 3.5 Flash" as the embedding model (a generative model, not an embedding model). Recommended adding an explicit embedding model row and flagged two options: Google `text-embedding-004` (provider-tied) or `bge-small-en-v1.5` (neutral, free).
+
+---
+
+### Prompt 22 — Gemini 2 Embedding Cost Analysis (2026-05-27)
+
+**Raw**:
+> What is the cost implications if I use google gemini 2 embeddings model
+
+**Interpreted intent**: Researched current pricing for Google Gemini Embedding 2 (gemini-embedding-2-preview). Found: $0.20/1M text tokens ($0.10/1M batch). Noted that `text-embedding-004` was deprecated January 14, 2026. Estimated embedding cost per DataMind pipeline run: $0.14–$2.80 depending on dataset size — potentially exceeding the $0.30 pipeline cost ceiling on multi-file uploads. Recommended batch API and per-HITL-column selection as mitigations.
+
+---
+
+### Prompt 23 — Embedding Model Recommendation (2026-05-27)
+
+**Raw**:
+> which embeddings model should I use for this project considering costs implications and considering multi file upload
+
+**Interpreted intent**: Recommended `nomic-embed-text-v1.5` as the primary embedding model for Phase 1 — free (self-hosted via sentence-transformers), 8,192-token context window (matching Gemini Embedding 2), 768 dimensions, provider-neutral (resolves PRD OQ-05). Noted it avoids the cost problem of cloud embeddings on multi-file uploads. Suggested upgrading to Gemini Embedding 2 batch API in Phase 2 if multimodal embedding is needed.
+
+---
+
+### Prompt 24 — Ollama Constraint and Alternative (2026-05-27)
+
+**Raw**:
+> it seems local installation of nomic-embed-text-v1.5 is not possible ..we will have to install ollama..Is there any other model which can be installed locally for our use case considering costs implications
+
+**Interpreted intent**: User correctly noted that nomic-embed-text-v1.5 requires Ollama or `trust_remote_code=True`. Researched pure pip-installable alternatives via sentence-transformers. Shortlisted: `bge-small-en-v1.5` (33MB, 512-token context), `bge-base-en-v1.5` (438MB, 512-token context), `bge-m3` (1.06GB, 8,192-token context). Recommended `BAAI/bge-m3` — pure pip install via sentence-transformers, 8K context avoids silent truncation of long business text (healthcare notes, financial narratives), free, provider-neutral.
+
+---
+
+### Prompt 25 — bge-m3 vs Gemini Embedding 2 Performance (2026-05-27)
+
+**Raw**:
+> How is the performance of BAAI/bge-m3 model compared to other models like Gemini 2.0 embeddings
+
+**Interpreted intent**: Researched MTEB benchmark scores. Found: Gemini Embedding 2 scores 68.32 on MTEB English (#1 by 5.09-point margin); bge-m3 scores ~62.6. The ~5-6 point gap is meaningful for complex domain-specific queries (healthcare notes, financial narratives) but less significant for simple intent matching. Also surfaced `Qwen3-Embedding-0.6B` as a newer open-source leader (MMTEB: 64.33 vs bge-m3's 59.56). Recommended two-phase approach: `Qwen3-Embedding-0.6B` (or bge-m3) for P1 at zero cost; Gemini Embedding 2 batch API for P2.
+
+---
+
+### Prompt 26 — Tech Stack Update: Supabase Auth + Qwen3-Embedding-0.6B (2026-05-27)
+
+**Raw**:
+> I want you to do some additions in my PRD and other related documents regarding tech stack..Add Qwen3-Embedding-0.6B for embeddings and for Auth add Supabase ..can you make sure to add these in all the files present in this folder. Also update prompt.md
+
+**Interpreted intent**: Applied two tech stack additions across all 10 documentation files:
+
+**Supabase Auth** (replaces custom JWT + Argon2):
+- Supabase Auth handles email/password, JWT session management, email verification, refresh token rotation
+- `password_hash` column removed from `users` table; `user_id` now references `auth.users(id)`
+- No `JWT_SIGNING_KEY` env var — replaced with `SUPABASE_ANON_KEY` + `SUPABASE_SERVICE_ROLE_KEY`
+- RBAC roles stored as Supabase Auth custom claims
+
+**Qwen3-Embedding-0.6B** (new embedding model):
+- `pip install sentence-transformers` — no Ollama required
+- 8,192-token context window, ~0.6B params, MMTEB score 64.33 (above bge-m3)
+- Provider-neutral — resolves PRD OQ-05
+- Separate `EmbeddingModel` class added to LLD.md; `embed_text()` removed from `GoogleGeminiProvider`
+- Layer 4 storage descriptions updated across all docs
+
+**Files modified**: `CLAUDE.md`, `docs/plan.md`, `docs/HLD.md`, `docs/architecture.md`, `docs/memory.md`, `docs/LLD.md`, `docs/planphase.md`, `docs/context.md`, `docs/tasks.md`, `docs/errors.md`, `docs/prompt.md`
+
+---
+
+### Prompt 27 — Also Update README.md, skills.md, and PRD Word File (2026-05-27)
+
+**Raw**:
+> looks like you have not updated readme.md, skillls.md and updated PRD word file with these changes
+
+**Interpreted intent**: Three files were missed in the Prompt 26 sweep. Applied the same Supabase Auth + Qwen3-Embedding-0.6B changes to:
+- `README.md` — Tech Stack table: added Authentication row (Supabase Auth) and Embeddings row (Qwen3-Embedding-0.6B); Layer 4 updated; Week 1 timeline updated
+- `skills.md` — Pattern 2 (Type-Aware Column Routing): textual semantic comment updated to Qwen3-Embedding-0.6B; Skill Combination block: users table references auth.users, FastAPI uses Supabase Auth JWT, Qwen3-Embedding-0.6B added
+- `docs/DataMind_AI_PRD_updated.docx` — Updated via python-docx script (`docs/update_prd_docx.py`, deleted after use); 8 text replacements applied across paragraphs and table cells
+
+---
+
+## Session 8 — 2026-05-27
+
+### Prompt 28 — Create Full Boilerplate Code
+
+**Raw**:
+> Now I want you to create a boiler plate code using HLD, LLD and claude.md which will have all infra setup
+
+**Interpreted intent**: Generate production-grade boilerplate code for the entire DataMind AI platform, wiring together every layer of the architecture defined in the docs. All files are functional boilerplate (not stubs) — real configs, real logic, real types.
+
+**Files created**:
+
+#### Root / Docker / CI
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Local dev stack — backend, frontend, postgres (15 + pgvector), prometheus, grafana |
+| `.env.example` | All required environment variables with descriptions |
+| `Makefile` | `make dev`, `migrate`, `lint`, `test`, `build`, `tf-init/plan/apply`, `clean` |
+| `.github/workflows/ci.yml` | GitHub Actions: lint → test → Docker build/push (GHCR) → Terraform plan |
+
+#### Backend — Core
+| File | Purpose |
+|------|---------|
+| `backend/pyproject.toml` | All P1 Python dependencies (fastapi, sqlalchemy, langgraph, litellm, sentence-transformers, etc.) |
+| `backend/Dockerfile` | Multi-stage build; libmagic installed for python-magic |
+| `backend/app/core/config.py` | `Settings(BaseSettings)` — all env vars with defaults, `is_production`, `allowed_origins_list` |
+| `backend/app/core/database.py` | SQLAlchemy async engine (asyncpg), `AsyncSessionLocal`, `get_db()`, Supabase client singleton |
+| `backend/app/core/security.py` | `get_current_user()` — validates Supabase Auth JWT; `require_admin()` — checks role claim |
+| `backend/app/core/storage.py` | `StorageClient` — archive presigned URLs, JSON upload/download to Supabase Storage |
+| `backend/app/core/embeddings.py` | `EmbeddingModel` (Qwen3-Embedding-0.6B via sentence-transformers); `get_embedding_model()` singleton |
+| `backend/app/core/llm.py` | `LLMClient` — litellm abstraction, 3-retry, structured completion, token/latency logging |
+| `backend/app/main.py` | FastAPI app — CORS, slowapi rate limiter, Prometheus instrumentator, structlog, `/health`, `/metrics` |
+
+#### Backend — Models
+| File | Purpose |
+|------|---------|
+| `backend/app/models/db.py` | SQLAlchemy ORM: `Tenant`, `User`, `Dataset`, `HITLDecision`, `PipelineRun`, `LLMProviderConfig`, `AuditLog` |
+| `backend/app/models/schemas.py` | Pydantic v2: all request/response schemas — Auth, Domain, Upload, HITL #1/#2/#3, Dashboard, JobStatus |
+
+#### Backend — API Routes
+| File | Purpose |
+|------|---------|
+| `backend/app/api/v1/router.py` | Main API router — aggregates all sub-routers at `/api/v1` |
+| `backend/app/api/v1/auth.py` | `POST /auth/signup`, `/login`, `/refresh`, `/logout` via Supabase Auth |
+| `backend/app/api/v1/datasets.py` | Upload URLs, ingest trigger, HITL #1 merge plan, HITL #2 cleaning plan, HITL #3 intent |
+| `backend/app/api/v1/jobs.py` | `GET /jobs/{id}` status polling, `GET /jobs/{id}/audit` log download |
+| `backend/app/api/v1/dashboards.py` | `POST /dashboards/generate`, `GET /dashboards/{dataset_id}` |
+| `backend/app/api/v1/admin/router.py` | Users list/role, LLM config read/write, LLM usage rollup, domain packs, system health, audit search |
+
+#### Backend — Agents
+| Agent | Role |
+|-------|------|
+| `supervisor.py` | LangGraph state machine — orchestrates the pipeline; HITL pause points |
+| `domain.py` | Loads domain prompt pack (6 domains, KPIs, vocab, cleaning/analysis hints) |
+| `ingestion.py` | Format detection, CSV/JSON parsing, column profiling, multi-file merge plan proposal |
+| `cleaning_plan.py` | LLM-generated numbered cleaning plan with heuristic fallback; does NOT execute |
+| `cleaning_executor.py` | Executes approved steps (dedup, impute median/mode, coerce, outlier flag); full audit entries |
+| `intent.py` | Parses natural-language question into structured `AnalysisSpec` via LLM |
+| `analysis.py` | SQL on PostgreSQL (numeric), pgvector cosine search (textual), SQL safety validation |
+| `dashboard_agent.py` | Generates KPI cards + chart specs from analysis results via LLM |
+| `insights.py` | Adds domain-flavoured narrative and recommended action to dashboard |
+
+#### Backend — Workers & Alembic
+| File | Purpose |
+|------|---------|
+| `backend/app/workers/tasks.py` | 5 async pipeline task functions: ingest, cleaning_plan, cleaning_executor, intent_analysis, dashboard |
+| `backend/alembic/env.py` | Alembic async migration env (asyncpg) |
+| `backend/alembic/versions/001_initial_schema.py` | Initial migration: all 7 tables + pgvector extension + HNSW index + useful indexes |
+| `backend/alembic/script.py.mako` | Alembic migration template |
+| `backend/tests/__init__.py` | Test package init |
+
+#### Frontend
+| File | Purpose |
+|------|---------|
+| `frontend/package.json` | Next.js 14, Supabase JS, Recharts, react-dropzone, shadcn/ui deps, Tailwind |
+| `frontend/tsconfig.json` | TypeScript strict config with `@/*` path alias |
+| `frontend/next.config.ts` | API proxy rewrite to backend, React strict mode |
+| `frontend/tailwind.config.ts` | shadcn/ui-compatible Tailwind config with CSS variable tokens |
+| `frontend/app/globals.css` | CSS variable definitions (light + dark) |
+| `frontend/app/layout.tsx` | Root layout with Inter font and metadata |
+| `frontend/app/page.tsx` | Landing page with links to `/app` and `/admin` |
+| `frontend/app/(user)/layout.tsx` | User UI shell — top nav (Upload, Datasets, Dashboard, Audit Log) |
+| `frontend/app/(user)/page.tsx` | Upload page — drag-and-drop (react-dropzone), domain selector, upload → ingest → job polling |
+| `frontend/app/admin/layout.tsx` | Admin UI shell — sidebar navigation |
+| `frontend/app/admin/page.tsx` | Admin overview — system health KPIs + LLM usage by provider table |
+| `frontend/lib/supabase.ts` | Supabase Auth client (signUp, signIn, signOut, getSession) |
+| `frontend/lib/api.ts` | Typed API client — attaches Supabase Auth Bearer token to every request |
+| `frontend/lib/types.ts` | TypeScript mirrors of all Pydantic schemas |
+| `frontend/Dockerfile` | Multi-stage Next.js standalone build |
+
+#### Infra
+| File | Purpose |
+|------|---------|
+| `infra/terraform/main.tf` | Supabase Storage buckets (archive + json) with prevent_destroy |
+| `infra/terraform/variables.tf` | All Terraform input variables |
+| `infra/terraform/outputs.tf` | Bucket name outputs for CI |
+| `infra/prometheus/prometheus.yml` | Prometheus scrape config — backend `/metrics` endpoint |
+
+**Architecture decisions captured in code**:
+- All agents are LLM-agnostic (via `LLMClient`); no agent hardcodes a provider
+- Cleaning plan and cleaning executor are separate agents — plan never auto-executes
+- pgvector HNSW index (`m=16, ef_construction=64`) created in migration for sub-10ms cosine search
+- In-memory job registry for P1 (BackgroundTasks has no persistent job store; Redis Streams in P2)
+- SQL safety: only `SELECT` statements pass through to the DB; non-SELECT is blocked and logged
+- `dataset_embeddings` table is dataset-scoped with `ON DELETE CASCADE` for clean teardown
+
+**Files modified**: `docs/prompt.md`

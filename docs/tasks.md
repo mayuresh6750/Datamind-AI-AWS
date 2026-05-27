@@ -11,7 +11,7 @@
 |---|---|---|
 | **FE** | Frontend Developer | Next.js 14, TypeScript, Tailwind, shadcn/ui, Recharts, Vega-Lite |
 | **BE** | Backend Developer | FastAPI, Pydantic v2, Supabase Database (PostgreSQL), Alembic, FastAPI BackgroundTasks, Redis |
-| **AI** | AI / Agent Engineer | LangGraph agents, LLM abstraction (Google Gemini 3.5 Flash + Kimi), Supabase Vector (pgvector), PostgreSQL, domain packs |
+| **AI** | AI / Agent Engineer | LangGraph agents, LLM abstraction (Google Gemini 3.5 Flash), Qwen3-Embedding-0.6B (sentence-transformers), Supabase Vector (pgvector), PostgreSQL, domain packs |
 | **DO** | DevOps / Infra Engineer | Supabase (Storage + Database + Vault), Docker, GitHub Actions CI/CD, GHCR, Prometheus/Grafana |
 | **QA** | QA Engineer | Unit tests, integration tests, E2E tests, golden datasets, performance |
 
@@ -40,7 +40,7 @@ Priority: **P1** = Must-have (blocks release) | **P2** = High | **P3** = Medium
 | S1-04 | Docker Compose for local dev — Supabase local emulator (Postgres) + Supabase Vector (pgvector) + Redis | DO | P1 | 2 | — |
 | S1-05 | FastAPI project structure — routers, middleware, dependencies, pyproject.toml, uv workspace | BE | P1 | 2 | S1-04 |
 | S1-06 | Database schema + Alembic migrations — users, tenants, datasets, pipeline_runs, hitl_decisions, audit_events, jobs, llm_provider_config | BE | P1 | 3 | S1-03, S1-04 |
-| S1-07 | JWT auth endpoints — POST /auth/signup, /auth/login, /auth/refresh, /auth/logout | BE | P1 | 3 | S1-06 |
+| S1-07 | Supabase Auth integration — configure email/password provider, POST /auth/signup, /auth/login, /auth/refresh, /auth/logout wired to Supabase Auth SDK | BE | P1 | 3 | S1-06 |
 | S1-08 | RBAC middleware — role claim enforcement on every FastAPI route | BE | P1 | 2 | S1-07 |
 | S1-09 | GET /health endpoint — checks Supabase Database, Redis, Supabase Storage connectivity | BE | P1 | 1 | S1-05, S1-03 |
 | S1-10 | Next.js 14 project setup — TypeScript, Tailwind CSS, shadcn/ui, pnpm workspace | FE | P1 | 2 | — |
@@ -114,7 +114,7 @@ Priority: **P1** = Must-have (blocks release) | **P2** = High | **P3** = Medium
 | S4-04 | Cleaning Executor Agent — run only approved steps against JSON, write audit event per step | AI | P1 | 3 | S3-11, S4-03 |
 | S4-05 | Write cleaned data to curated Supabase Storage Parquet (Layer 2) — versioned per cleaning run | BE | P1 | 2 | S4-04 |
 | S4-06 | Load numeric/structured columns into Supabase Database table (Layer 3) — one typed table per dataset_id | BE | P1 | 3 | S4-05 |
-| S4-07 | Embed textual columns + load into Supabase Vector (pgvector) (Layer 4) — HNSW index, per-tenant collection namespace | AI | P1 | 3 | S4-05 |
+| S4-07 | Embed textual columns using Qwen3-Embedding-0.6B (sentence-transformers) + load into Supabase Vector (pgvector) (Layer 4) — HNSW index, per-tenant collection namespace | AI | P1 | 3 | S4-05 |
 | S4-08 | Intent capture screen (U6) — free-text input, domain-tuned suggestion chips, HITL #3 confirmation | FE | P1 | 3 | S4-01 |
 | S4-09 | POST /datasets/{id}/intent — submit intent text, return restated interpretation for HITL #3 | BE | P1 | 1 | S4-05 |
 | S4-10 | Intent Agent — parse free-text goal into structured AnalysisSpec, biased by domain pack + schema | AI | P1 | 3 | S3-08, S3-05 |

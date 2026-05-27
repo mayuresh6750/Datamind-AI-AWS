@@ -41,13 +41,15 @@ All API errors follow a consistent JSON envelope. Pipeline errors have a structu
 
 ## Authentication & Authorization Errors
 
+> Auth is handled by **Supabase Auth**. JWTs are issued and validated by Supabase Auth; the FastAPI middleware verifies the token signature using Supabase's public JWT secret.
+
 | Code | HTTP | Message | Resolution |
 |---|---|---|---|
 | `AUTH_TOKEN_MISSING` | 401 | No JWT provided in Authorization header. | Include `Authorization: Bearer <token>` |
-| `AUTH_TOKEN_EXPIRED` | 401 | JWT has expired. Please refresh. | Use refresh token to obtain a new access token |
-| `AUTH_TOKEN_INVALID` | 401 | JWT signature verification failed. | Re-authenticate |
+| `AUTH_TOKEN_EXPIRED` | 401 | JWT has expired. Please refresh. | Use Supabase Auth refresh token to obtain a new access token |
+| `AUTH_TOKEN_INVALID` | 401 | JWT signature verification failed. | Re-authenticate via Supabase Auth |
 | `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is invalid or has been revoked. | Re-authenticate from scratch |
-| `AUTH_EMAIL_TAKEN` | 409 | An account with this email already exists. | Log in or use password reset |
+| `AUTH_EMAIL_TAKEN` | 409 | An account with this email already exists. | Log in or use Supabase Auth password reset |
 | `AUTH_INVALID_CREDENTIALS` | 401 | Email or password is incorrect. | Check credentials |
 | `RBAC_INSUFFICIENT_ROLE` | 403 | Your role does not permit access to this resource. | Admin access required; contact your tenant admin |
 | `RBAC_ADMIN_DEMOTED` | 401 | Your admin role has been revoked. Please re-authenticate. | Re-login with updated role |

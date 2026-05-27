@@ -1,6 +1,6 @@
 # DataMind AI — Claude Project Instructions
 
-**Tech Stack**: Google Gemini 3.5 Flash | Supabase (Storage + DB + Vector/pgvector) | FastAPI BackgroundTasks | PostgreSQL | Python stdlib | Next.js 14
+**Tech Stack**: Google Gemini 3.5 Flash | Supabase (Auth + Storage + DB + Vector/pgvector) | FastAPI BackgroundTasks | PostgreSQL | Python stdlib | Next.js 14 | Qwen3-Embedding-0.6B
 
 ---
 
@@ -51,7 +51,9 @@ Built around four deliberate principles: (1) domain-first approach — ask users
 |-------|-------------------|----------------|
 | Presentation — User UI | Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, Recharts | Domain selection, file upload, validation/merge UI, HITL cleaning review, intent capture, dashboard, audit view |
 | Presentation — Admin UI | Next.js (route group /admin/*, RBAC-gated), shadcn/ui, Recharts | User management, LLM/domain config, system health, audit log, domain pack viewer |
-| API Gateway | Python 3.11+, FastAPI, Pydantic v2, JWT auth, RBAC middleware | REST API, request validation, async job dispatch, role enforcement |
+| Authentication | Supabase Auth (email/password, JWT session management, email verification) | Sign-up, login, logout, JWT issuance, session refresh, role-based redirect |
+| API Gateway | Python 3.11+, FastAPI, Pydantic v2, Supabase Auth JWT validation, RBAC middleware | REST API, request validation, async job dispatch, role enforcement |
+| Embeddings | Qwen3-Embedding-0.6B (sentence-transformers, self-hosted in FastAPI container) | Text column embeddings for pgvector; user intent embeddings; 8K context, provider-neutral |
 | Agent Orchestration | LangGraph (supervisor pattern), Pydantic-validated outputs | Multi-agent pipeline coordination, state machine, retry, HITL gates |
 | LLM Provider Layer | LiteLLM-compatible abstraction; Google Gemini 3.5 Flash | Per-tenant model config; per-agent routing; cost & latency tracking |
 | Ingestion / Conversion | openpyxl, python-magic, chardet, Python stdlib (csv, json) | Format detection, parsing, multi-file merge planning, JSON normalisation, type-routing classification |
@@ -87,7 +89,7 @@ All LLM calls go through a LiteLLM-compatible abstraction layer. Agents are mode
 | Layer 1 — Raw | Supabase Storage (versioned) | Original uploaded files, unmodified | Archive URI in dataset record |
 | Layer 2 — JSON | Supabase Storage + PostgreSQL | JSON normalised data + typed PostgreSQL tables | All agents operate on JSON; SQL on typed tables |
 | Layer 3 — Numeric/Structured | PostgreSQL | Numeric, boolean, datetime, low-cardinality categorical columns | SQL queries |
-| Layer 4 — Textual/Semantic | Supabase Vector (pgvector) | Vector embeddings of free-text columns | Semantic search (cosine similarity, HNSW index) |
+| Layer 4 — Textual/Semantic | Supabase Vector (pgvector) | Vector embeddings (Qwen3-Embedding-0.6B) of free-text columns | Semantic search (cosine similarity, HNSW index) |
 
 ### Data Type Classification Rules
 
@@ -264,9 +266,8 @@ All LLM calls go through a LiteLLM-compatible abstraction layer. Agents are mode
 
 ## Security Requirements
 
-- JWT authentication (HS256, 1-hour expiry, refresh tokens)
-- Argon2 password hashing
-- RBAC with two roles: user, admin
+- Supabase Auth (JWT session management, email/password, email verification, refresh tokens)
+- RBAC with two roles: user, admin (custom claims via Supabase Auth metadata)
 - Per-user prefix isolation in Supabase Storage
 - Encryption at rest: AES-256 (Supabase managed)
 - Encryption in transit: TLS 1.3 minimum
@@ -367,7 +368,8 @@ If timeline slips, cut in this order:
 ## Database Schema (Core Tables)
 
 ### users
-- user_id (UUID PK), tenant_id (FK→tenants), email (UNIQUE), password_hash, role (user/admin), active_domain (finance/healthcare/retail/marketing/operations/other), created_at
+- user_id (UUID PK, FK→auth.users.id), tenant_id (FK→tenants), email (UNIQUE), role (user/admin), active_domain (finance/healthcare/retail/marketing/operations/other), created_at
+- Note: password management handled entirely by Supabase Auth (auth.users); no password_hash stored in this table
 
 ### datasets
 - dataset_id (UUID PK), user_id (FK), original_filenames (TEXT[]), detected_format (csv/xlsx/json/parquet), file_count, merge_strategy (single/union/join/separate), merge_key_column, archive_uris, json_uri, row_count_raw, row_count_clean, status (state machine), created_at/updated_at

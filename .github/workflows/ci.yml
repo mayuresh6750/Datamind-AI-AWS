@@ -1,0 +1,157 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BACKEND: ghcr.io/${{ github.repository }}/backend
+  IMAGE_FRONTEND: ghcr.io/${{ github.repository }}/frontend
+
+jobs:
+  # ─── Backend ───────────────────────────────────────────────────────────────
+  backend-lint-test:
+    name: Backend — lint & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Mypy type check
+        run: mypy app --ignore-missing-imports
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/datamind_test
+          SUPABASE_URL: http://localhost:54321
+          SUPABASE_ANON_KEY: test-anon-key
+          SUPABASE_SERVICE_ROLE_KEY: test-service-key
+          LLM_PROVIDER: google_gemini
+          LLM_MODEL: gemini-2.0-flash
+          LLM_API_KEY: test-key
+          EMBEDDING_MODEL: Qwen/Qwen3-Embedding-0.6B
+          STORAGE_ARCHIVE_BUCKET: datamind-archive
+          STORAGE_JSON_BUCKET: datamind-json
+
+  # ─── Frontend ──────────────────────────────────────────────────────────────
+  frontend-lint-typecheck:
+    name: Frontend — lint & type-check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package.json
+
+      - run: npm install -g pnpm && pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm type-check
+
+      - name: Lint
+        run: pnpm lint
+
+  # ─── Docker Build & Push ───────────────────────────────────────────────────
+  build-push:
+    name: Build & push images
+    runs-on: ubuntu-latest
+    needs: [backend-lint-test, frontend-lint-typecheck]
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ env.IMAGE_BACKEND }}:${{ github.sha }},${{ env.IMAGE_BACKEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ env.IMAGE_FRONTEND }}:${{ github.sha }},${{ env.IMAGE_FRONTEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── Terraform Plan (staging) ──────────────────────────────────────────────
+  tf-plan:
+    name: Terraform plan
+    runs-on: ubuntu-latest
+    needs: build-push
+    if: github.ref == 'refs/heads/main'
+    defaults:
+      run:
+        working-directory: infra/terraform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+
+      - name: Terraform Init
+        run: terraform init
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var="supabase_project_id=${{ secrets.SUPABASE_PROJECT_ID }}" \
+            -var="supabase_access_token=${{ secrets.SUPABASE_ACCESS_TOKEN }}" \
+            -var="supabase_db_password=${{ secrets.SUPABASE_DB_PASSWORD }}" \
+            -var="ghcr_image_backend=${{ env.IMAGE_BACKEND }}:${{ github.sha }}" \
+            -var="ghcr_image_frontend=${{ env.IMAGE_FRONTEND }}:${{ github.sha }}" \
+            -out=tfplan
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
