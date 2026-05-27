@@ -2,7 +2,7 @@
 
 ## Current State (Session 10 — 2026-05-26)
 
-**Tech stack**: Google Gemini 3.5 Flash | Supabase (DB + Vector/pgvector) | FastAPI BackgroundTasks | PostgreSQL | Python stdlib
+**Tech stack**: Google Gemini 3.5 Flash | Supabase Auth | Supabase (DB + Vector/pgvector) | FastAPI BackgroundTasks | PostgreSQL | Python stdlib | Qwen3-Embedding-0.6B (sentence-transformers)
 
 **File processing pipeline**:
 1. Upload any format (CSV, XLSX, JSON, Parquet) → archive original to `supabase://datamind-archive/`

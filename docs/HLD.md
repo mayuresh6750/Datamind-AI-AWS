@@ -24,7 +24,7 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
     ▼        ▼
  ┌─────────────────────────────────────────────────────────────┐
  │      API Gateway        │
- │  FastAPI + Pydantic v2 + JWT Auth + RBAC    │
+ │  FastAPI + Pydantic v2 + Supabase Auth + RBAC   │
  │  ┌──────────────────────────────────────────────────┐ │
  │  │ REST Endpoints (/api/v1/*)      │ │
  │  │ Auth | Datasets | Jobs | Dashboards | Admin  │ │
@@ -123,7 +123,7 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 |-----------|-----------|-------------|
 | User UI | Next.js 14, TypeScript, Tailwind, shadcn/ui, Recharts | Screens: domain selection, upload, HITL #1–#3, dashboard, audit log |
 | Admin UI | Next.js 14 (route group /admin/*) | Screens: system health, user management, LLM config, domain packs, audit viewer |
-| Auth | JWT (HS256, 1h expiry) + refresh tokens | Sign-up, login, logout, role-based redirect |
+| Auth | Supabase Auth (email/password, JWT, email verification, refresh tokens) | Sign-up, login, logout, session management, role-based redirect |
 
 ### 3.2 API Gateway (FastAPI)
 
@@ -168,7 +168,7 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 | L1 Raw | Supabase Storage (versioned) | Original files — never modified | Immutable source |
 | L2 Curated | Supabase Storage + Parquet | Cleaned columnar data | PostgreSQL |
 | L3 Numeric/Structured | Supabase Database (PostgreSQL) + PostgreSQL | Numeric, bool, date, low-cardinality categorical | SQL |
-| L4 Textual/Semantic | Supabase Vector (pgvector, HNSW index) | Vector embeddings (free-text columns) | Cosine similarity |
+| L4 Textual/Semantic | Supabase Vector (pgvector, HNSW index) | Vector embeddings via Qwen3-Embedding-0.6B (free-text columns) | Cosine similarity |
 | Metadata | Supabase Database (PostgreSQL) | users, datasets, pipeline_runs, decisions, config | SQL |
 
 ### 3.6 Async Job Queue
@@ -205,8 +205,8 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 
 | Concern | Implementation |
 |---------|---------------|
-| Authentication | JWT (HS256), 1h access token, refresh token rotation |
-| Authorization | RBAC with `user` / `admin` roles; server-side enforcement on all `/admin/*` routes |
+| Authentication | Supabase Auth — JWT session management, email/password, email verification, refresh token rotation |
+| Authorization | RBAC with `user` / `admin` roles via Supabase Auth custom claims; server-side enforcement on all `/admin/*` routes |
 | Data encryption | AES-256 at rest (Supabase managed), TLS 1.3 in transit |
 | Secrets management | Supabase Vault — API keys never in env files or source code |
 | SQL injection | sqlglot validates all generated SQL as read-only before execution |

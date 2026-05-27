@@ -22,13 +22,15 @@ DataMind AI is an agentic data intelligence platform that takes a business user 
 | Layer | Technology |
 |-------|------------|
 | Frontend | Next.js 14, TypeScript, Tailwind CSS, shadcn/ui, Recharts |
+| Authentication | Supabase Auth (email/password, JWT session management, email verification, refresh tokens) |
 | Backend | Python 3.11+, FastAPI, Pydantic v2, FastAPI BackgroundTasks |
 | Agent Orchestration | LangGraph (supervisor pattern) |
 | LLM Provider | LiteLLM abstraction; Google Gemini 3.5 Flash (Phase 1) |
+| Embeddings | Qwen3-Embedding-0.6B (sentence-transformers, self-hosted, 8K context, provider-neutral) |
 | Layer 1 — Raw Storage | Supabase Storage (versioned, per-user prefix) |
 | Layer 2 — Curated Storage | Supabase Storage, JSON |
 | Layer 3 — Numeric/Structured | Supabase Database (PostgreSQL) + PostgreSQL |
-| Layer 4 — Textual/Semantic | Supabase Vector (pgvector, HNSW index) |
+| Layer 4 — Textual/Semantic | Supabase Vector (pgvector, HNSW index) + Qwen3-Embedding-0.6B |
 | Secrets | Supabase Vault |
 | Observability | Prometheus + Grafana |
 | CI/CD | GitHub Actions |
@@ -45,7 +47,7 @@ DataMind AI is an agentic data intelligence platform that takes a business user 
 | Layer 1 | Original files (immutable) | Supabase Storage |
 | Layer 2 | Cleaned JSON (archive originals) | Supabase Storage + PostgreSQL |
 | Layer 3 | Numeric, boolean, date, categorical | PostgreSQL |
-| Layer 4 | Free-text embeddings | Supabase Vector (pgvector) |
+| Layer 4 | Free-text embeddings (Qwen3-Embedding-0.6B) | Supabase Vector (pgvector) |
 
 ### Agent System (Phase 1)
 
@@ -115,7 +117,7 @@ DataMind-AI/
 
 | Week | Dates | Focus | Exit Criteria |
 |------|-------|-------|---------------|
-| 1 | May 6–9 | Foundation | User can sign up, log in, hit /health. CI/CD deploys to staging. |
+| 1 | May 6–9 | Foundation | Supabase Auth configured, user can sign up/log in, hit /health. CI/CD deploys to staging. |
 | 2 | May 12–16 | Domain + Ingestion | Domain persists. Multi-file upload works. HITL #1 renders. |
 | 3 | May 19–23 | Cleaning + LLM | Cleaning plan generated. ≥60% acceptance on golden datasets 1–5. |
 | 4 | May 26–30 | Analysis + Dashboard | E2E happy path for CSV and Parquet merge. |

@@ -117,7 +117,7 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 | Layer 1 — Raw | Supabase Storage (versioned bucket, per-user prefix) | Immutable source of truth; original files preserved |
 | Layer 2 — Curated | Supabase Storage (JSON) | Cleaned, queryable columnar data; versioned per cleaning run |
 | Layer 3 — Numeric/Structured | Supabase Database (PostgreSQL) + PostgreSQL (in-process) | SQL queries over numeric, boolean, datetime, categorical columns |
-| Layer 4 — Textual/Vector | Supabase Vector (pgvector) | Vector embeddings for free-text columns; semantic search via HNSW index |
+| Layer 4 — Textual/Vector | Supabase Vector (pgvector) + Qwen3-Embedding-0.6B | Vector embeddings for free-text columns; semantic search via HNSW index |
 | Metadata | Supabase Database (PostgreSQL, single-AZ) | Users, roles, datasets, pipeline runs, HITL decisions, audit, usage meters |
 
 **Column classification rules:**
@@ -298,12 +298,12 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 ### F9 — Auth, RBAC, and Dual UI
 
 **What ships:**
-- Email + password authentication; JWT tokens (HS256, 1-hour expiry, refresh tokens)
-- Two roles in Phase 1: **user** and **admin**
+- Supabase Auth — email/password sign-up/login, JWT session management, email verification, refresh token rotation
+- Two roles in Phase 1: **user** and **admin** (stored as Supabase Auth custom claims)
 - RBAC enforced server-side via FastAPI middleware on every endpoint
 - Frontend hides admin routes from non-admins but never trusts frontend alone
 - Single workspace per user in Phase 1 (multi-workspace deferred)
-- Admins invited; users self-register
+- Admins invited; users self-register via Supabase Auth
 
 **User UI screens:**
 1. Sign up / log in
@@ -371,7 +371,7 @@ All Phase 1 features are tagged **P0** (must ship). Every P0 feature requires a 
 | Supabase project setup: Storage buckets (raw + curated), Database schema, Vault | Infra |
 | Redis + FastAPI BackgroundTasks worker setup | Infra |
 | FastAPI project structure, Pydantic v2 models | Backend |
-| JWT auth + RBAC middleware | Backend |
+| Supabase Auth integration + RBAC middleware | Backend |
 | DB schema: users, roles, datasets, pipeline_runs, hitl_decisions, audit_log | Backend |
 | Next.js 14 project setup, Tailwind, shadcn/ui | Frontend |
 | Sign up / log in screens | Frontend |

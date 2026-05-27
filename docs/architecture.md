@@ -31,7 +31,7 @@ The backend separates the API gateway from the agent worker so long-running pipe
 │                  │
 │ FastAPI (Python 3.11+)            │
 │ Pydantic v2 request/response validation       │
-│ JWT auth middleware (HS256, 1hr expiry, refresh tokens)   │
+│ Supabase Auth JWT validation middleware (session, refresh tokens)  │
 │ RBAC middleware (role claim enforcement on every endpoint)   │
 │ Async job dispatch → returns job_id immediately     │
 │ Rate limiting: 100 req/min per user        │
@@ -84,7 +84,7 @@ The backend separates the API gateway from the agent worker so long-running pipe
 │ Access path: SQL (aggregate, filter, join)      │
 │                  │
 │ Layer 4 — Textual/Semantic (Supabase Vector (pgvector))        │
-│ Free-text columns embedded with tenant's default embedding model │
+│ Free-text columns embedded with Qwen3-Embedding-0.6B (sentence-transformers) │
 │ HNSW index for cosine similarity         │
 │ Access path: semantic search (similarity queries)    │
 │                  │
@@ -267,8 +267,8 @@ response = await llm_client.structured_completion(
 
 ## Security Architecture
 
-- **Auth**: JWT HS256, 1-hour expiry, refresh tokens. Argon2 password hashing.
-- **RBAC**: Two roles in P1 (user, admin) — enforced server-side on every endpoint. Role embedded in JWT claim; demotion invalidates tokens within 15 min via refresh-token rotation.
+- **Auth**: Supabase Auth — email/password, JWT session management, email verification, refresh token rotation. Password hashing managed by Supabase Auth internally.
+- **RBAC**: Two roles in P1 (user, admin) — enforced server-side on every endpoint. Role stored as Supabase Auth custom claim; demotion invalidates tokens within 15 min via refresh-token rotation.
 - **UI separation**: `/admin/*` returns HTTP 403 from FastAPI middleware for non-admin tokens. Frontend hides admin nav — but the server is the source of truth.
 - **Supabase Storage isolation**: Per-user prefix isolation. Each user can only read/write their own `{user_id}/` prefix via signed URLs.
 - **Tenant isolation**: `tenant_id` scoping on every Supabase Database query. pgvector collection namespace per tenant.
@@ -309,7 +309,7 @@ Images pushed to **GitHub Container Registry (GHCR)**. Infrastructure defined in
 
 | Table | Purpose |
 |---|---|
-| `users` | user_id, tenant_id, email, password_hash, role, active_domain |
+| `users` | user_id (FK→auth.users.id), tenant_id, email, role, active_domain — password managed by Supabase Auth |
 | `datasets` | dataset_id, user_id, filenames[], format, merge_strategy, raw_uris[], curated_uri, status |
 | `hitl_decisions` | decision_id, dataset_id, user_id, checkpoint, proposal_json, decision_json, latency_seconds |
 | `pipeline_runs` | run_id, dataset_id, status, started_at, completed_at, error_summary, audit_log_uri, llm_tokens, cost_usd |
