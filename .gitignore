@@ -1,2 +1,7 @@
 .claude/settings.local.json
 opencodetest/
+
+# Environment files — never commit real credentials
+.env
+.env.local
+.env.*.local
