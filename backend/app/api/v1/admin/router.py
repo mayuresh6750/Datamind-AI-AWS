@@ -77,9 +77,9 @@ async def update_llm_config(
     config_id: uuid.UUID,
     default_provider: str,
     default_model: str,
-    per_agent_overrides: dict = {},
-    current_user: AdminUser = Depends(require_admin),
+    current_user: AdminUser,
     db: AsyncSession = Depends(get_db),
+    per_agent_overrides: dict = {},
 ):
     result = await db.execute(select(LLMProviderConfig).where(LLMProviderConfig.config_id == config_id))
     config = result.scalar_one_or_none()

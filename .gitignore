@@ -5,3 +5,59 @@ opencodetest/
 .env
 .env.local
 .env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.venv
+
+# uv
+uv.lock
+.uv/
+
+# Alembic compiled
+backend/alembic/__pycache__/
+backend/alembic/versions/__pycache__/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+"new 2.txt"
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/.pnpm-store/
+pnpm-lock.yaml
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Test / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Terraform state
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+
+# Docker
+*.env.docker
