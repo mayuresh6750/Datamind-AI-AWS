@@ -89,7 +89,7 @@ async def update_llm_config(
     config.default_provider = default_provider
     config.default_model = default_model
     config.per_agent_overrides = per_agent_overrides
-    config.updated_by_user_id = uuid.UUID(current_user["sub"])
+    config.updated_by_user_id = uuid.UUID(current_user["user_id"])
     await db.commit()
     return {"updated": True}
 

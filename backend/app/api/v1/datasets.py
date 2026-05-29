@@ -39,7 +39,7 @@ async def update_domain(
     db: AsyncSession = Depends(get_db),
 ):
     from app.models.db import User
-    result = await db.execute(select(User).where(User.user_id == uuid.UUID(current_user["sub"])))
+    result = await db.execute(select(User).where(User.user_id == uuid.UUID(current_user["user_id"])))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found.")
@@ -64,12 +64,12 @@ async def get_upload_urls(
 
     upload_urls: dict[str, str] = {}
     for filename in body.filenames:
-        path = storage.archive_path(str(current_user["sub"]), str(dataset_id), filename)
+        path = storage.archive_path(str(current_user["user_id"]), str(dataset_id), filename)
         upload_urls[filename] = storage.get_archive_upload_url(path)
 
     dataset = Dataset(
         dataset_id=dataset_id,
-        user_id=uuid.UUID(current_user["sub"]),
+        user_id=uuid.UUID(current_user["user_id"]),
         original_filenames=body.filenames,
         detected_format="csv",  # overwritten during ingest
         file_count=len(body.filenames),
@@ -90,13 +90,13 @@ async def ingest_dataset(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    dataset = await _get_owned_dataset(db, dataset_id, current_user["sub"])
+    dataset = await _get_owned_dataset(db, dataset_id, current_user["user_id"])
     if dataset.status != "uploaded":
         raise HTTPException(status_code=409, detail=f"Dataset status is '{dataset.status}', expected 'uploaded'.")
 
     from app.workers.tasks import run_ingest_pipeline
     job_id = str(uuid.uuid4())
-    background_tasks.add_task(run_ingest_pipeline, str(dataset_id), str(current_user["sub"]), job_id)
+    background_tasks.add_task(run_ingest_pipeline, str(dataset_id), str(current_user["user_id"]), job_id)
 
     dataset.status = "profiling"
     await db.commit()
@@ -112,7 +112,7 @@ async def get_merge_plan(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    dataset = await _get_owned_dataset(db, dataset_id, current_user["sub"])
+    dataset = await _get_owned_dataset(db, dataset_id, current_user["user_id"])
     if dataset.status != "awaiting_hitl_merge":
         raise HTTPException(status_code=409, detail="Merge plan not ready yet.")
 
@@ -131,13 +131,13 @@ async def submit_merge_decision(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    dataset = await _get_owned_dataset(db, dataset_id, current_user["sub"])
+    dataset = await _get_owned_dataset(db, dataset_id, current_user["user_id"])
     if dataset.status != "awaiting_hitl_merge":
         raise HTTPException(status_code=409, detail="No pending merge decision.")
 
     hitl = HITLDecision(
         dataset_id=dataset_id,
-        user_id=uuid.UUID(current_user["sub"]),
+        user_id=uuid.UUID(current_user["user_id"]),
         checkpoint="schema_merge",
         proposal_json=await _latest_hitl_json(db, dataset_id, "schema_merge"),
         decision_json=body.model_dump(),
@@ -164,7 +164,7 @@ async def get_cleaning_plan(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    dataset = await _get_owned_dataset(db, dataset_id, current_user["sub"])
+    dataset = await _get_owned_dataset(db, dataset_id, current_user["user_id"])
     if dataset.status != "awaiting_hitl_cleaning":
         raise HTTPException(status_code=409, detail="Cleaning plan not ready yet.")
 
@@ -183,13 +183,13 @@ async def submit_cleaning_decision(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    dataset = await _get_owned_dataset(db, dataset_id, current_user["sub"])
+    dataset = await _get_owned_dataset(db, dataset_id, current_user["user_id"])
     if dataset.status != "awaiting_hitl_cleaning":
         raise HTTPException(status_code=409, detail="No pending cleaning decision.")
 
     hitl = HITLDecision(
         dataset_id=dataset_id,
-        user_id=uuid.UUID(current_user["sub"]),
+        user_id=uuid.UUID(current_user["user_id"]),
         checkpoint="cleaning_plan",
         proposal_json=await _latest_hitl_json(db, dataset_id, "cleaning_plan"),
         decision_json=body.model_dump(),
@@ -215,13 +215,13 @@ async def submit_intent(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    dataset = await _get_owned_dataset(db, dataset_id, current_user["sub"])
+    dataset = await _get_owned_dataset(db, dataset_id, current_user["user_id"])
     if dataset.status != "ready":
         raise HTTPException(status_code=409, detail="Dataset not ready for analysis.")
 
     job_id = str(uuid.uuid4())
     from app.workers.tasks import run_intent_analysis_pipeline
-    background_tasks.add_task(run_intent_analysis_pipeline, str(dataset_id), body.question, str(current_user["sub"]), job_id)
+    background_tasks.add_task(run_intent_analysis_pipeline, str(dataset_id), body.question, str(current_user["user_id"]), job_id)
 
     return JobResponse(job_id=job_id, status="queued")
 
