@@ -30,7 +30,7 @@ async def generate_dashboard(
     job_id_override: str | None = None,
 ):
     result = await db.execute(
-        select(Dataset).where(Dataset.dataset_id == dataset_id, Dataset.user_id == uuid.UUID(current_user["sub"]))
+        select(Dataset).where(Dataset.dataset_id == dataset_id, Dataset.user_id == uuid.UUID(current_user["user_id"]))
     )
     dataset = result.scalar_one_or_none()
     if dataset is None:
@@ -40,7 +40,7 @@ async def generate_dashboard(
 
     job_id = job_id_override or str(uuid.uuid4())
     from app.workers.tasks import run_dashboard_pipeline
-    background_tasks.add_task(run_dashboard_pipeline, str(dataset_id), str(current_user["sub"]), job_id)
+    background_tasks.add_task(run_dashboard_pipeline, str(dataset_id), str(current_user["user_id"]), job_id)
 
     return JobResponse(job_id=job_id, status="queued")
 
@@ -52,7 +52,7 @@ async def get_dashboard(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Dataset).where(Dataset.dataset_id == dataset_id, Dataset.user_id == uuid.UUID(current_user["sub"]))
+        select(Dataset).where(Dataset.dataset_id == dataset_id, Dataset.user_id == uuid.UUID(current_user["user_id"]))
     )
     dataset = result.scalar_one_or_none()
     if dataset is None:
