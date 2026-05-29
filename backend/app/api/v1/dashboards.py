@@ -24,10 +24,10 @@ _dashboard_cache: dict[str, dict] = {}
 @router.post("/generate", response_model=JobResponse)
 async def generate_dashboard(
     dataset_id: uuid.UUID,
-    job_id_override: str | None = None,
-    background_tasks: BackgroundTasks = BackgroundTasks(),
-    current_user: CurrentUser = Depends(get_current_user),
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
+    job_id_override: str | None = None,
 ):
     result = await db.execute(
         select(Dataset).where(Dataset.dataset_id == dataset_id, Dataset.user_id == uuid.UUID(current_user["sub"]))

@@ -1,9 +1,17 @@
 import os
 from logging.config import fileConfig
+from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, pool
 
 from alembic import context
+
+# Load .env from backend/ or root (whichever exists first)
+for env_path in [Path(__file__).parent.parent / ".env", Path(__file__).parent.parent.parent / ".env"]:
+    if env_path.exists():
+        load_dotenv(env_path)
+        break
 
 config = context.config
 
