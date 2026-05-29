@@ -1,8 +1,7 @@
-import asyncio
+import os
 from logging.config import fileConfig
 
-from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy import create_engine, pool
 
 from alembic import context
 
@@ -17,10 +16,22 @@ from app.models import db as _models  # noqa: F401 — ensures models are regist
 target_metadata = Base.metadata
 
 
+def get_sync_url() -> str:
+    """
+    Convert asyncpg URL to psycopg2 for Alembic (sync driver required).
+    Also strips ?ssl=require from URL and passes it via connect_args instead.
+    """
+    url = os.environ.get("DATABASE_URL") or config.get_main_option("sqlalchemy.url", "")
+    url = url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    url = url.replace("postgresql://", "postgresql+psycopg2://")
+    # Remove ssl param from URL — passed via connect_args below
+    url = url.split("?")[0]
+    return url
+
+
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=get_sync_url(),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -29,28 +40,16 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def do_run_migrations(connection):
-    context.configure(connection=connection, target_metadata=target_metadata)
-    with context.begin_transaction():
-        context.run_migrations()
-
-
-async def run_async_migrations() -> None:
-    configuration = config.get_section(config.config_ini_section) or {}
-    configuration["sqlalchemy.url"] = config.get_main_option("sqlalchemy.url")
-
-    connectable = async_engine_from_config(
-        configuration,
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-    async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
-    await connectable.dispose()
-
-
 def run_migrations_online() -> None:
-    asyncio.run(run_async_migrations())
+    connectable = create_engine(
+        get_sync_url(),
+        poolclass=pool.NullPool,
+        connect_args={"sslmode": "require"},
+    )
+    with connectable.connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
 
 
 if context.is_offline_mode():
