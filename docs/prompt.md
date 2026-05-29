@@ -907,3 +907,156 @@ git push origin main --force
 - `dataset_embeddings` table is dataset-scoped with `ON DELETE CASCADE` for clean teardown
 
 **Files modified**: `docs/prompt.md`
+
+---
+
+## Session 9 — 2026-05-28
+
+### Prompt 29 — Remove new 2.txt from main and dev
+
+**Raw**:
+> can you remove new2.txt from main and dev from my git repo
+
+**Interpreted intent**: Remove the file `new 2.txt` from both remote branches. Found it was never committed to either branch (only an untracked local file), so no action was needed on the remote. File does not exist in git history.
+
+---
+
+### Prompt 30 — Move Priyanka-k/feat-infra under Feature branch
+
+**Raw**:
+> can you move priyanka-k/feat-infra completely under Feature branch so I should be able to see priyanka-k/feat-infra under Feature branch and priyanka branch should disappear when I click branches..I don't want to see files lying in Feature branch clean it
+
+**Interpreted intent**: Rename `Priyanka-k/feat-infra` so it nests under Feature in GitHub's branch grouping, delete the old branch, and keep the Feature branch clean (no merged files).
+
+**Outcome**: Discovered git cannot have both `Feature` and `Feature/anything` simultaneously (ref naming conflict — file vs directory). Asked user to choose approach.
+
+---
+
+### Prompt 31 — Clarify Branch Approach
+
+**Raw**:
+> Keep Feature as-is, rename Priyanka's branch
+
+**Interpreted intent**: Keep `Feature` branch unchanged. Rename `Priyanka-k/feat-infra` to a flat name.
+
+**Actions taken**:
+- Created `feat-infra-priyanka` from `origin/Priyanka-k/feat-infra` and pushed to remote
+- Deleted `Priyanka-k/feat-infra` from remote
+- Reverted `Feature` branch back to pre-merge state (`bd4ee6a`) via `git reset --hard` + force push
+
+---
+
+### Prompt 32 — Rename Feature to feature, Empty It
+
+**Raw**:
+> Just rename Feature branch as feature and remove all files from feature branch..don't change anything in my local though
+
+**Interpreted intent**: Rename `Feature` → `feature` (lowercase) on remote only; make the branch completely empty; no local changes.
+
+**Actions taken**:
+- Created an empty commit using git's empty tree hash (`4b825dc642cb6eb9a060e54bf8d69288fbee4904`) via `git commit-tree`
+- Pushed that empty commit as new `feature` branch on remote
+- Deleted `Feature` from remote
+- No local files were touched
+
+**Remote branches after**: `main`, `dev`, `feature` (empty), `feat-infra-priyanka`, `archive/development-backup-2026-05-26`
+
+---
+
+### Prompt 33 — Confirm CI/CD in Boilerplate
+
+**Raw**:
+> can you please confirm if you have implemented CICD in boilerplate code?
+
+**Interpreted intent**: Verify what CI/CD was included in the boilerplate and what it does.
+
+**Outcome**: Confirmed `.github/workflows/ci.yml` exists with 4 jobs triggered on push to `main`/`dev` and PRs to `main`:
+1. `backend-lint-test` — Ruff + Mypy + pytest (every push)
+2. `frontend-lint-typecheck` — pnpm type-check + ESLint (every push)
+3. `build-push` — Docker build + push to GHCR (main only)
+4. `tf-plan` — Terraform plan for Supabase Storage (main only)
+
+GitHub Secrets required to activate: `SUPABASE_PROJECT_ID`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
+
+---
+
+### Prompt 34 — What Goes in .env File
+
+**Raw**:
+> What all configurations I will need to make to proceed ahead..I mean what all I will need to include in .env file
+
+**Interpreted intent**: Full guide to filling in `.env` — where to find each value, what can stay as default, and what GitHub secrets are needed for CI.
+
+**Outcome**: Provided grouped breakdown: Supabase (URL, anon key, service role key, DB URL), Gemini API key, auto-generated APP_SECRET_KEY, defaults (embedding model, buckets, rate limits), and GitHub Actions secrets. Quickstart order: Supabase project → buckets → Gemini key → generate secret → fill .env → `make migrate` → `make dev`.
+
+---
+
+### Prompt 35 — How to Get DATABASE_URL from Supabase
+
+**Raw**:
+> how to create this in supabase, DATABASE_URL Settings → Database → Connection string → URI (swap postgresql:// → postgresql+asyncpg://)
+
+**Interpreted intent**: Step-by-step guide to finding the connection string in Supabase dashboard.
+
+**Outcome**: Instructed to use the green **Connect** button at top of project → Connection string tab → URI. Only change needed: add `+asyncpg` after `postgresql`. Warned about replacing `[YOUR-PASSWORD]` placeholder.
+
+---
+
+### Prompt 36 — make migrate and pgvector Questions
+
+**Raw**:
+> what about this one, make migrate ← runs Alembic, creates all tables + pgvector..also, do I need to create a pgvector in supabase
+
+**Interpreted intent**: Explain what `make migrate` does and whether pgvector needs manual setup in Supabase.
+
+**Outcome**: pgvector is pre-installed in Supabase — just enable it under Database → Extensions → search "vector" → toggle on. `make migrate` runs `alembic upgrade head` which connects via DATABASE_URL and creates all 7 tables plus the `dataset_embeddings` pgvector table with HNSW index. Prerequisites: `pip install uv`, `uv venv`, `uv pip install -e ".[dev]"`, then `make migrate` from root.
+
+---
+
+### Prompt 37 — Create .env with Real Credentials
+
+**Raw**:
+> I have all the credentials now, here's the one. can you create a .env file including all these credentials..tell me if anything is left out to be included in .env file which I have not generated in this document and finalize .env file
+
+**Interpreted intent**: User shared credentials PDF with Supabase and Gemini keys. Create populated `.env` file and flag what's still missing.
+
+**Actions taken**:
+- Added `.env`, `.env.local`, `.env.*.local` to `.gitignore` (was missing) — committed and pushed to `main` and `dev`
+- Generated `APP_SECRET_KEY` via `secrets.token_hex(32)`
+- Created `.env` with all provided values filled in
+- Left `[YOUR-PASSWORD]` placeholder for DATABASE_URL and POSTGRES_PASSWORD (database password not in PDF)
+
+**Still missing at time of logging**: Supabase database password (the `[YOUR-PASSWORD]` in DATABASE_URL).
+
+---
+
+### Prompt 38 — Find Database Password in Supabase
+
+**Raw**:
+> I don't find database password under connect icon under any of the options..I also tried to check under project settings+database..where will I find the database password
+
+**Interpreted intent**: User couldn't locate the DB password in the Supabase UI.
+
+**Outcome**: Direct URL provided: `https://supabase.com/dashboard/project/viwdrpdzrzqdddbkbmvp/settings/database`. Password is under Settings (gear icon) → Database → "Database password" / "Reset database password" button — not in the Connect dialog.
+
+---
+
+### Prompt 39 — Remove Weird Character from Word File
+
+**Raw**:
+> can you access my "C:\Users\Smita\GenAI\Datamind_docs\env file configuration details.docx". There is one weird character towards the end of the file which appears all over the file..can you remove it from everywhere in the file
+
+**Interpreted intent**: User saw ¶ symbols throughout a Word document and wanted them removed.
+
+**Outcome**: Read the file with python-docx and scanned all paragraphs and table cells — the ¶ character (pilcrow, U+00B6) was not present in the actual file content. The ¶ marks were Word's **Show Formatting Marks** display mode being turned on. Instructed user to click the ¶ button in Home → Paragraph group to toggle it off. No file changes needed.
+
+---
+
+### Prompt 40 — Log All Prompts (2026-05-29)
+
+**Raw**:
+> log all the prompts in prompt.md after running the boiler plate code..I think that prompt is already logged
+
+**Interpreted intent**: Append all unlogged prompts from Sessions 8–9 to prompt.md. Prompt 28 (boilerplate creation) was already logged; Prompts 29–40 were missing.
+
+**Files modified**: `docs/prompt.md` — this entry
