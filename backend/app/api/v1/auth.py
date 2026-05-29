@@ -21,9 +21,15 @@ async def signup(body: SignUpRequest):
     if res.user is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Signup failed — check email/password.")
 
+    if res.session is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User already registered. Please use the login endpoint instead.",
+        )
+
     return AuthResponse(
-        access_token=res.session.access_token if res.session else "",
-        refresh_token=res.session.refresh_token if res.session else "",
+        access_token=res.session.access_token,
+        refresh_token=res.session.refresh_token,
         user_id=str(res.user.id),
         role=(res.user.user_metadata or {}).get("role", "user"),
     )
