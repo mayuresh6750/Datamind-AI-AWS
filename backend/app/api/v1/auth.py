@@ -1,9 +1,8 @@
 """Auth endpoints — signup, login, refresh, logout via Supabase Auth."""
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, HTTPException, status
 
-from app.core.database import get_db, get_supabase
+from app.core.database import get_supabase
 from app.models.schemas import AuthResponse, LoginRequest, SignUpRequest
 
 log = structlog.get_logger()
@@ -11,7 +10,7 @@ router = APIRouter()
 
 
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-async def signup(body: SignUpRequest, db: AsyncSession = Depends(get_db)):
+async def signup(body: SignUpRequest):
     supabase = get_supabase()
     try:
         res = supabase.auth.sign_up({"email": body.email, "password": body.password})
@@ -26,7 +25,7 @@ async def signup(body: SignUpRequest, db: AsyncSession = Depends(get_db)):
         access_token=res.session.access_token if res.session else "",
         refresh_token=res.session.refresh_token if res.session else "",
         user_id=str(res.user.id),
-        role=res.user.user_metadata.get("role", "user"),
+        role=(res.user.user_metadata or {}).get("role", "user"),
     )
 
 
@@ -36,6 +35,7 @@ async def login(body: LoginRequest):
     try:
         res = supabase.auth.sign_in_with_password({"email": body.email, "password": body.password})
     except Exception as exc:
+        log.warning("login_failed", error=str(exc))
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
     if res.session is None:
