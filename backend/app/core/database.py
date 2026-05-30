@@ -7,12 +7,18 @@ from supabase import Client, create_client
 from app.core.config import settings
 
 # ─── SQLAlchemy async engine ──────────────────────────────────────────────────
+import ssl as _ssl
+
 _db_url = settings.database_url.split("?")[0]  # strip ?ssl=require from URL
+
+_ssl_ctx = _ssl.create_default_context()
+_ssl_ctx.check_hostname = False
+_ssl_ctx.verify_mode = _ssl.CERT_NONE
 
 engine = create_async_engine(
     _db_url,
-    echo=settings.app_env == "development",
-    connect_args={"ssl": "require"},
+    echo=False,
+    connect_args={"ssl": _ssl_ctx},
     pool_size=5,
     max_overflow=10,
 )
