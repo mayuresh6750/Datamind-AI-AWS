@@ -9,8 +9,9 @@ from app.core.config import settings
 class StorageClient:
     """Wrapper around Supabase Storage for the four-layer architecture."""
 
-    def __init__(self, supabase: Client) -> None:
-        self._sb = supabase
+    def __init__(self, supabase: Client = None) -> None:
+        from app.core.database import get_supabase
+        self._sb = supabase or get_supabase()
 
     # ── Layer 1: Raw / Archive ────────────────────────────────────────────────
 
@@ -18,8 +19,7 @@ class StorageClient:
         ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
         return f"{user_id}/{dataset_id}/{ts}/{filename}"
 
-    def get_archive_upload_url(self, user_id: str, dataset_id: str, filename: str) -> str:
-        path = self.archive_path(user_id, dataset_id, filename)
+    def get_archive_upload_url(self, path: str) -> str:
         response = self._sb.storage.from_(settings.storage_archive_bucket).create_signed_upload_url(path)
         return response["signedUrl"]
 
