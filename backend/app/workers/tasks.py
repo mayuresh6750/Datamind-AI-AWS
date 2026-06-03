@@ -14,7 +14,8 @@ async def run_ingest_pipeline(dataset_id: str, user_id: str, job_id: str) -> Non
     register_job(job_id)
     update_job(job_id, "running", progress_pct=5, current_step="loading_files")
 
-    from app.core.database import AsyncSessionLocal, get_supabase
+    from app.core.database import AsyncSessionLocal
+    from app.core.storage import StorageClient
     from app.models.db import Dataset, HITLDecision, PipelineRun
     from app.agents.ingestion import IngestionAgent
     from sqlalchemy import select
@@ -27,28 +28,28 @@ async def run_ingest_pipeline(dataset_id: str, user_id: str, job_id: str) -> Non
             result = await db.execute(select(Dataset).where(Dataset.dataset_id == uuid.UUID(dataset_id)))
             dataset = result.scalar_one()
 
-            supabase = get_supabase()
+            storage = StorageClient()
             all_rows: list[dict] = []
             file_profiles = []
+            file_formats: list[str] = []
 
             update_job(job_id, "running", progress_pct=20, current_step="downloading_files")
 
-            for filename in dataset.original_filenames:
-                path = f"{user_id}/{dataset_id}/{filename}"
-                from app.core.config import settings
-                response = supabase.storage.from_(settings.storage_archive_bucket).download(path)
-                content = response
+            archive_paths = dataset.archive_uris or [
+                f"{user_id}/{dataset_id}/{filename}" for filename in dataset.original_filenames
+            ]
+            if len(archive_paths) != len(dataset.original_filenames):
+                raise ValueError("Stored archive paths do not match original filenames.")
+
+            for filename, path in zip(dataset.original_filenames, archive_paths, strict=True):
+                content = storage.download_archive(path)
 
                 fmt = ingestion.detect_format(filename, content)
-                if fmt == "csv":
-                    rows = ingestion.parse_csv(content)
-                elif fmt == "json":
-                    rows = ingestion.parse_json(content)
-                else:
-                    rows = ingestion.parse_csv(content)  # fallback
+                rows = ingestion.parse_content(fmt, content)
 
                 profiles = ingestion.profile_columns(rows)
                 file_profiles.append((filename, profiles))
+                file_formats.append(fmt)
                 all_rows.extend(rows)
 
             update_job(job_id, "running", progress_pct=60, current_step="generating_merge_plan")
@@ -75,7 +76,7 @@ async def run_ingest_pipeline(dataset_id: str, user_id: str, job_id: str) -> Non
 
             # Update dataset status and format
             dataset.status = "awaiting_hitl_merge"
-            dataset.detected_format = file_profiles[0][1][0].dtype if file_profiles else "csv"
+            dataset.detected_format = file_formats[0] if file_formats else "csv"
             dataset.row_count_raw = len(all_rows)
 
             await db.commit()
@@ -93,11 +94,11 @@ async def run_cleaning_plan_pipeline(dataset_id: str, merge_decision: dict, job_
     register_job(job_id)
     update_job(job_id, "running", progress_pct=10, current_step="loading_data")
 
-    from app.core.database import AsyncSessionLocal, get_supabase
+    from app.core.database import AsyncSessionLocal
+    from app.core.storage import StorageClient
     from app.models.db import Dataset, HITLDecision
     from app.agents.cleaning_plan import CleaningPlanAgent
     from app.agents.ingestion import IngestionAgent
-    from app.models.schemas import ColumnProfile
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
@@ -105,16 +106,18 @@ async def run_cleaning_plan_pipeline(dataset_id: str, merge_decision: dict, job_
             result = await db.execute(select(Dataset).where(Dataset.dataset_id == uuid.UUID(dataset_id)))
             dataset = result.scalar_one()
 
-            # Re-download and parse data
-            supabase = get_supabase()
+            # Re-download and parse data using stored archive URIs.
+            storage = StorageClient()
             ingestion = IngestionAgent()
-            from app.core.config import settings
 
+            archive_paths = dataset.archive_uris or [
+                f"{dataset.user_id}/{dataset_id}/{filename}" for filename in dataset.original_filenames
+            ]
             all_rows: list[dict] = []
-            for filename in dataset.original_filenames:
-                path = f"{dataset.user_id}/{dataset_id}/{filename}"
-                content = supabase.storage.from_(settings.storage_archive_bucket).download(path)
-                rows = ingestion.parse_csv(content)
+            for filename, path in zip(dataset.original_filenames, archive_paths, strict=True):
+                content = storage.download_archive(path)
+                fmt = ingestion.detect_format(filename, content)
+                rows = ingestion.parse_content(fmt, content)
                 all_rows.extend(rows)
 
             profiles = ingestion.profile_columns(all_rows)
@@ -155,7 +158,7 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
     register_job(job_id)
     update_job(job_id, "running", progress_pct=10, current_step="loading_data")
 
-    from app.core.database import AsyncSessionLocal, get_supabase
+    from app.core.database import AsyncSessionLocal
     from app.core.storage import StorageClient
     from app.models.db import AuditLog, Dataset, HITLDecision, PipelineRun
     from app.agents.cleaning_executor import CleaningExecutorAgent
@@ -169,15 +172,17 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
             result = await db.execute(select(Dataset).where(Dataset.dataset_id == uuid.UUID(dataset_id)))
             dataset = result.scalar_one()
 
-            supabase = get_supabase()
+            storage = StorageClient()
             ingestion = IngestionAgent()
-            from app.core.config import settings
 
+            archive_paths = dataset.archive_uris or [
+                f"{dataset.user_id}/{dataset_id}/{filename}" for filename in dataset.original_filenames
+            ]
             all_rows: list[dict] = []
-            for filename in dataset.original_filenames:
-                path = f"{dataset.user_id}/{dataset_id}/{filename}"
-                content = supabase.storage.from_(settings.storage_archive_bucket).download(path)
-                all_rows.extend(ingestion.parse_csv(content))
+            for filename, path in zip(dataset.original_filenames, archive_paths, strict=True):
+                content = storage.download_archive(path)
+                fmt = ingestion.detect_format(filename, content)
+                all_rows.extend(ingestion.parse_content(fmt, content))
 
             profiles = ingestion.profile_columns(all_rows)
 
@@ -199,7 +204,6 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
             update_job(job_id, "running", progress_pct=65, current_step="storing_json")
 
             # Store cleaned JSON in Supabase Storage (Layer 2)
-            storage = StorageClient()
             json_path = storage.json_path(str(dataset.user_id), dataset_id)
             await storage.upload_json(json_path, cleaned_rows)
 

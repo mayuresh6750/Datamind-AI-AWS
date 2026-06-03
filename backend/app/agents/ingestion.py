@@ -4,7 +4,10 @@ import io
 import json
 from typing import Any
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import structlog
+from openpyxl import load_workbook
 
 from app.core.llm import LLMClient
 from app.models.schemas import ColumnProfile, MergePlan
@@ -35,8 +38,8 @@ class IngestionAgent:
             return "unknown"
 
     def parse_csv(self, content: bytes) -> list[dict]:
-        text = content.decode("utf-8", errors="replace")
-        reader = csv.DictReader(io.StringIO(text))
+        text = content.decode("utf-8-sig", errors="replace")
+        reader = csv.DictReader(io.StringIO(text, newline=""))
         return list(reader)
 
     def parse_json(self, content: bytes) -> list[dict]:
@@ -44,6 +47,48 @@ class IngestionAgent:
         if isinstance(data, list):
             return data
         return [data]
+
+    def parse_xlsx(self, content: bytes) -> list[dict]:
+        workbook = load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+        rows: list[dict] = []
+
+        for sheet in workbook.worksheets:
+            values = list(sheet.iter_rows(values_only=True))
+            if not values:
+                continue
+
+            headers = [str(value).strip() if value is not None else "" for value in values[0]]
+            if not any(headers):
+                continue
+
+            for raw_row in values[1:]:
+                if raw_row is None or not any(value is not None and value != "" for value in raw_row):
+                    continue
+
+                row = {
+                    header: value
+                    for header, value in zip(headers, raw_row, strict=False)
+                    if header
+                }
+                if row:
+                    rows.append(row)
+
+        return rows
+
+    def parse_parquet(self, content: bytes) -> list[dict]:
+        table = pq.read_table(pa.BufferReader(content))
+        return table.to_pylist()
+
+    def parse_content(self, fmt: str, content: bytes) -> list[dict]:
+        if fmt == "csv":
+            return self.parse_csv(content)
+        if fmt == "json":
+            return self.parse_json(content)
+        if fmt == "xlsx":
+            return self.parse_xlsx(content)
+        if fmt == "parquet":
+            return self.parse_parquet(content)
+        raise ValueError(f"Unsupported file format: {fmt}")
 
     def profile_columns(self, rows: list[dict]) -> list[ColumnProfile]:
         if not rows:

@@ -1,4 +1,3 @@
-import uuid
 from datetime import datetime
 
 from supabase import Client
@@ -9,9 +8,12 @@ from app.core.config import settings
 class StorageClient:
     """Wrapper around Supabase Storage for the four-layer architecture."""
 
-    def __init__(self, supabase: Client = None) -> None:
-        from app.core.database import get_supabase
-        self._sb = supabase or get_supabase()
+    def __init__(self, supabase: Client | None = None) -> None:
+        if supabase is None:
+            from app.core.database import get_supabase
+
+            supabase = get_supabase()
+        self._sb = supabase
 
     # ── Layer 1: Raw / Archive ────────────────────────────────────────────────
 
@@ -22,6 +24,9 @@ class StorageClient:
     def get_archive_upload_url(self, path: str) -> str:
         response = self._sb.storage.from_(settings.storage_archive_bucket).create_signed_upload_url(path)
         return response["signedUrl"]
+
+    def download_archive(self, path: str) -> bytes:
+        return self._sb.storage.from_(settings.storage_archive_bucket).download(path)
 
     def get_archive_download_url(self, path: str, expires_in: int = 3600) -> str:
         response = self._sb.storage.from_(settings.storage_archive_bucket).create_signed_url(
