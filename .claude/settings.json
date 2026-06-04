@@ -1,0 +1,9 @@
+{
+  "permissions  ": {
+    "allow": [
+      "PowerShell(cd \"C:\\\\Users\\\\gsuni\\\\OneDrive\\\\Desktop\\\\AI_Project\\\\PROJECT-9-DataMind-AI\\\\frontend\"; $env:CI=\"true\"; pnpm dev --host 0.0.0.0)",
+      "PowerShell(Get-Process | Where-Object {$_.ProcessName -match 'node|python'} | Select-Object ProcessName, Id, CPU)",
+      "Bash(pnpm dev *)"
+    ]
+  }
+}

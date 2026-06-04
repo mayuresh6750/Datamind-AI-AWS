@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.storage import StorageClient
-from app.models.db import Dataset, HITLDecision
+from app.models.db import Dataset, HITLDecision, Tenant, User
 from app.models.schemas import (
     CleaningPlan,
     CleaningPlanDecision,
@@ -62,15 +62,20 @@ async def get_upload_urls(
     dataset_id = uuid.uuid4()
     storage = StorageClient()
 
+    await _ensure_local_user(db, current_user)
+
     upload_urls: dict[str, str] = {}
+    archive_uris: list[str] = []
     for filename in body.filenames:
         path = storage.archive_path(str(current_user["user_id"]), str(dataset_id), filename)
+        archive_uris.append(path)
         upload_urls[filename] = storage.get_archive_upload_url(path)
 
     dataset = Dataset(
         dataset_id=dataset_id,
         user_id=uuid.UUID(current_user["user_id"]),
         original_filenames=body.filenames,
+        archive_uris=archive_uris,
         detected_format="csv",  # overwritten during ingest
         file_count=len(body.filenames),
         status="uploaded",
@@ -79,6 +84,34 @@ async def get_upload_urls(
     await db.commit()
 
     return UploadURLResponse(dataset_id=str(dataset_id), upload_urls=upload_urls)
+
+
+async def _ensure_local_user(db: AsyncSession, current_user: dict) -> User:
+    """Create a local users row for valid Supabase users if it doesn't exist yet."""
+    user_id = uuid.UUID(current_user["user_id"])
+
+    result = await db.execute(select(User).where(User.user_id == user_id))
+    user = result.scalar_one_or_none()
+    if user is not None:
+        return user
+
+    tenant_result = await db.execute(select(Tenant).order_by(Tenant.created_at.asc()).limit(1))
+    tenant = tenant_result.scalar_one_or_none()
+    if tenant is None:
+        tenant = Tenant(name="Default Tenant")
+        db.add(tenant)
+        await db.flush()
+
+    user = User(
+        user_id=user_id,
+        tenant_id=tenant.tenant_id,
+        email=current_user.get("email") or f"{user_id}@local.invalid",
+        role=current_user.get("role", "user"),
+        active_domain="other",
+    )
+    db.add(user)
+    await db.flush()
+    return user
 
 
 # ─── Ingest ───────────────────────────────────────────────────────────────────
