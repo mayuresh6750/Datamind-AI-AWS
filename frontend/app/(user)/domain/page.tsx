@@ -23,11 +23,20 @@ export default function DomainPage() {
   const [saving, setSaving] = useState(false)
   const handleContinue = async () => {
     setSaving(true)
-    await api.patch('/me/domain', {
+    await api.patch('/datasets/me/domain', {
       domain: selected,
       descriptor: selected === 'other' ? descriptor : undefined,
     })
     setSaving(false)
+    const st = useAuthStore.getState()
+    st.setAuth({
+      token: st.token,
+      refreshToken: st.refreshToken,
+      userId: st.userId,
+      role: st.role,
+      email: st.email,
+      activeDomain: selected,
+    })
     router.push('/upload')
   }
   return (
