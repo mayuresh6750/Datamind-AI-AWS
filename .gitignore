@@ -5,6 +5,8 @@ opencodetest/
 .env
 .env.local
 .env.*.local
+prompt.md
+ADMIN_TESTING_QUICK_START.md
 
 # Python
 __pycache__/
@@ -61,3 +63,5 @@ htmlcov/
 
 # Docker
 *.env.docker
+
+

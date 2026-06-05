@@ -1,0 +1,6 @@
+auto-install-peers=true
+shamefully-hoist=true
+confirmModulesPurge=false
+ignore-scripts=false
+allow-scripts=true
+include-workspace-root=true
