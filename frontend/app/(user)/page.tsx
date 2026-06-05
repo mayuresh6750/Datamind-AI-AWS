@@ -9,6 +9,7 @@ const DOMAINS = ["finance", "healthcare", "retail", "marketing", "operations", "
 export default function UploadPage() {
   const [domain, setDomain] = useState<string>("finance");
   const [files, setFiles] = useState<File[]>([]);
+  const [progress, setProgress] = useState<Record<string, number>>({})
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,28 +31,50 @@ export default function UploadPage() {
     setError(null);
 
     try {
-      const { dataset_id, upload_urls } = await api.post<{ dataset_id: string; upload_urls: Record<string, string> }>(
+      const { data } = await api.post<{ dataset_id: string; upload_urls: Record<string, string> }>(
         "/datasets/upload-url",
         { filenames: files.map((f) => f.name) }
       );
+      const { dataset_id, upload_urls } = data;
 
       setStatus("Uploading files…");
+      // upload helper with progress via XHR
+      const uploadWithProgress = (url: string, file: File, onProgress: (p: number) => void) =>
+        new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          xhr.open('PUT', url)
+          xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream')
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
+          }
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) resolve()
+            else reject(new Error(`Upload failed: ${xhr.status}`))
+          }
+          xhr.onerror = () => reject(new Error('Network error'))
+          xhr.send(file)
+        })
+
       await Promise.all(
         files.map((file) =>
-          fetch(upload_urls[file.name], { method: "PUT", body: file, headers: { "Content-Type": file.type } })
+          uploadWithProgress(upload_urls[file.name], file, (p) => setProgress((s) => ({ ...s, [file.name]: p })))
         )
-      );
+      )
 
       setStatus("Triggering ingestion…");
-      const { job_id } = await api.post<{ job_id: string }>(`/datasets/${dataset_id}/ingest`, {});
+      const { data: ingestData } = await api.post<{ job_id: string }>(`/datasets/${dataset_id}/ingest`, {});
+      const job_id = ingestData.job_id
       setStatus(`Pipeline started. Job ID: ${job_id}. Polling for merge plan…`);
 
       // Poll for status
       let attempts = 0;
       const interval = setInterval(async () => {
         attempts++;
-        const jobStatus = await api.get<{ status: string; current_step: string | null }>(`/jobs/${job_id}`);
+        const { data: jobStatus } = await api.get<{ status: string; current_step: string | null }>(`/jobs/${job_id}`);
         setStatus(`Job status: ${jobStatus.status} — ${jobStatus.current_step ?? ""}`);
+        if (jobStatus.status === "profiling") {
+          // show profiling specifically
+        }
         if (jobStatus.status === "complete" || jobStatus.status === "failed" || attempts > 60) {
           clearInterval(interval);
         }
@@ -100,6 +123,12 @@ export default function UploadPage() {
               <li key={f.name} className="flex items-center gap-2">
                 <span className="font-mono">{f.name}</span>
                 <span className="text-muted-foreground">({(f.size / 1024 / 1024).toFixed(1)} MB)</span>
+                <div className='flex-1 ml-3'>
+                  <div className='h-2 bg-slate-100 rounded overflow-hidden mt-1'>
+                    <div style={{ width: `${progress[f.name] ?? 0}%` }} className='h-2 bg-primary' />
+                  </div>
+                  <div className='text-xs text-muted-foreground mt-1'>{progress[f.name] ?? 0}%</div>
+                </div>
               </li>
             ))}
           </ul>

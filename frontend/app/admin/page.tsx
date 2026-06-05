@@ -20,8 +20,8 @@ export default function AdminOverviewPage() {
   const [usage, setUsage] = useState<UsageRow[]>([]);
 
   useEffect(() => {
-    api.get<HealthData>("/admin/health").then(setHealth).catch(() => {});
-    api.get<UsageRow[]>("/admin/llm-providers/usage").then(setUsage).catch(() => {});
+    api.get<HealthData>("/admin/health").then((r) => setHealth(r.data)).catch(() => {});
+    api.get<UsageRow[]>("/admin/llm-providers/usage").then((r) => setUsage(r.data)).catch(() => {});
   }, []);
 
   return (

@@ -1,34 +1,39 @@
-import { supabase } from "./supabase";
+import axios from 'axios'
+import { useAuthStore } from '@/store/authStore'
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+export const api = axios.create({
+  baseURL: (process.env.NEXT_PUBLIC_API_URL ?? '') + '/api/v1',
+  headers: { 'Content-Type': 'application/json' },
+})
 
-async function getAuthHeaders(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+api.interceptors.request.use((config) => {
+  const token = useAuthStore.getState().token
+  if (token && config.headers) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${BASE}/api/v1${path}`, {
-    method,
-    headers: { "Content-Type": "application/json", ...headers },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(err.detail ?? err.message ?? "Request failed");
+api.interceptors.response.use(
+  (res) => res,
+  async (err) => {
+    const original = err.config
+    if (err.response?.status === 401 && !original._retry) {
+      original._retry = true
+      try {
+        const refresh = useAuthStore.getState().refreshToken
+        const { data } = await axios.post(
+          (process.env.NEXT_PUBLIC_API_URL ?? '') + '/api/v1/auth/refresh',
+          { refresh_token: refresh }
+        )
+        useAuthStore.getState().setAuth(data)
+        original.headers.Authorization = `Bearer ${data.token}`
+        return api(original)
+      } catch (e) {
+        useAuthStore.getState().clearAuth()
+        if (typeof window !== 'undefined') window.location.href = '/(auth)/login'
+      }
+    }
+    return Promise.reject(err)
   }
+)
 
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
-}
-
-export const api = {
-  get: <T>(path: string) => request<T>("GET", path),
-  post: <T>(path: string, body: unknown) => request<T>("POST", path, body),
-  patch: <T>(path: string, body: unknown) => request<T>("PATCH", path, body),
-  put: <T>(path: string, body: unknown) => request<T>("PUT", path, body),
-  delete: <T>(path: string) => request<T>("DELETE", path),
-};
+export default api
