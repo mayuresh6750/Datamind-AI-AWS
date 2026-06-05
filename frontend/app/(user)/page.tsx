@@ -30,10 +30,11 @@ export default function UploadPage() {
     setError(null);
 
     try {
-      const { dataset_id, upload_urls } = await api.post<{ dataset_id: string; upload_urls: Record<string, string> }>(
+      const { data } = await api.post<{ dataset_id: string; upload_urls: Record<string, string> }>(
         "/datasets/upload-url",
         { filenames: files.map((f) => f.name) }
       );
+      const { dataset_id, upload_urls } = data;
 
       setStatus("Uploading files…");
       await Promise.all(
@@ -43,14 +44,15 @@ export default function UploadPage() {
       );
 
       setStatus("Triggering ingestion…");
-      const { job_id } = await api.post<{ job_id: string }>(`/datasets/${dataset_id}/ingest`, {});
+      const { data: ingestData } = await api.post<{ job_id: string }>(`/datasets/${dataset_id}/ingest`, {});
+      const job_id = ingestData.job_id
       setStatus(`Pipeline started. Job ID: ${job_id}. Polling for merge plan…`);
 
       // Poll for status
       let attempts = 0;
       const interval = setInterval(async () => {
         attempts++;
-        const jobStatus = await api.get<{ status: string; current_step: string | null }>(`/jobs/${job_id}`);
+        const { data: jobStatus } = await api.get<{ status: string; current_step: string | null }>(`/jobs/${job_id}`);
         setStatus(`Job status: ${jobStatus.status} — ${jobStatus.current_step ?? ""}`);
         if (jobStatus.status === "complete" || jobStatus.status === "failed" || attempts > 60) {
           clearInterval(interval);

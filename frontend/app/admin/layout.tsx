@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import Navbar from '@/components/Navbar';
 
 const adminNav = [
   { href: "/admin", label: "Overview" },
@@ -15,7 +16,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen flex-col">
+      <Navbar />
       <aside className="w-56 border-r px-4 py-6 space-y-1">
         <p className="px-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">Admin</p>
         {adminNav.map((item) => (
