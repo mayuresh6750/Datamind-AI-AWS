@@ -31,7 +31,7 @@ class EmbeddingModel:
 
     @property
     def dimensions(self) -> int:
-        return self._model.get_sentence_embedding_dimension() or 1024
+        return self._model.get_embedding_dimension() or 1024
 
 
 @lru_cache(maxsize=1)

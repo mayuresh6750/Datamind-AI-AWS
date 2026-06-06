@@ -63,5 +63,3 @@ htmlcov/
 
 # Docker
 *.env.docker
-
-
