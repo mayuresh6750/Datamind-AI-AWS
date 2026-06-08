@@ -22,6 +22,7 @@ interface PipelineState {
   dashboard: DashboardSpec | null
   error: string | null
   setDataset: (id: string) => void
+  setJobId: (id: string) => void
   setStatus: (s: PipelineStatus) => void
   setMergePlan: (p: MergePlan) => void
   setCleaningPlan: (p: CleaningPlan) => void
@@ -43,6 +44,7 @@ const initial = {
 export const usePipelineStore = create<PipelineState>()((set) => ({
   ...initial,
   setDataset: (id) => set({ datasetId: id, status: 'uploaded' }),
+  setJobId: (id) => set({ jobId: id }),
   setStatus: (s) => set({ status: s }),
   setMergePlan: (p) => set({ mergePlan: p }),
   setCleaningPlan: (p) => set({ cleaningPlan: p }),

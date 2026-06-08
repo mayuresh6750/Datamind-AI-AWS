@@ -1,3 +1,17 @@
+export interface UploadURLRequest {
+  filenames: string[]
+}
+
+export interface UploadURLResponse {
+  dataset_id: string
+  upload_urls: Record<string, string>
+}
+
+export interface IngestResponse {
+  job_id: string
+  status: string
+}
+
 export interface MergePlanDecision {
 	approved: boolean
 	merge_strategy: string

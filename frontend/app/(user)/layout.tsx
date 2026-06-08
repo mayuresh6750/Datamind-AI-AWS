@@ -2,17 +2,15 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAuthStore } from "@/store/authStore";
 import { api } from "@/lib/api";
 import Navbar from '@/components/Navbar';
 import DomainModal from '@/components/DomainModal';
 
 const navItems = [
-  { href: "/app", label: "Upload" },
-  { href: "/app/datasets", label: "Datasets" },
-  { href: "/app/dashboard", label: "Dashboard" },
-  { href: "/app/audit", label: "Audit Log" },
+  { href: "/", label: "Upload" },
+  { href: "/domain", label: "Domain" },
 ];
 
 export default function UserLayout({ children }: { children: React.ReactNode }) {
@@ -22,11 +20,20 @@ export default function UserLayout({ children }: { children: React.ReactNode }) 
   const activeDomain = useAuthStore((s) => s.activeDomain);
   const clearAuth = useAuthStore.getState().clearAuth;
 
+  // Wait for Zustand to rehydrate from localStorage before evaluating auth.
+  // Without this gate the layout redirects to /login on first render because
+  // the store starts null and only receives the persisted value after mount.
+  const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
-    if (typeof window !== "undefined" && !token) {
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (!token) {
       router.push('/login');
     }
-  }, [token, router]);
+  }, [token, hydrated, router]);
 
   async function handleLogout() {
     try {
@@ -41,10 +48,13 @@ export default function UserLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="flex min-h-screen flex-col">
       <Navbar />
-      {!activeDomain && <DomainModal />}
+      {/* Only show the domain modal after Zustand has hydrated from localStorage.
+          Without this guard the modal flashes on every page load because the store
+          starts with activeDomain = null before the persisted value is read. */}
+      {hydrated && !activeDomain && <DomainModal />}
       <header className="border-b px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-6">
-          <Link href="/app" className="font-bold text-lg">
+          <Link href="/" className="font-bold text-lg">
             DataMind AI
           </Link>
           <nav className="flex gap-4 text-sm">

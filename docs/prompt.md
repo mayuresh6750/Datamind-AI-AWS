@@ -1159,6 +1159,51 @@ GitHub Secrets required to activate: `SUPABASE_PROJECT_ID`, `SUPABASE_ACCESS_TOK
 
 ---
 
+---
+
+## Session 11 — 2026-06-05
+
+### Prompt 51 — Merge feature/sun_admin_setup into dev
+
+**Raw**:
+> There is a remote branch in my rapo sun_admin_setup..I want you to merge it with dev branch(not main) only..merge a feature branch in such a way that dev will have all the latest files from this feature branch and dev branch is updated..you might have conflicts while merging in storage.py, resolve it and I should have the latest storage.py including all the changes in dev and feature branch..dev should be updated
+
+**Interpreted intent**: Fetch `origin/feature/sun_admin_setup`, merge into local `dev`, resolve conflict in `storage.py` preserving both branches' changes, push updated `dev` to remote.
+
+**Actions taken**:
+- Fetched `origin/feature/sun_admin_setup`
+- Found active merge already in progress on `dev` with `storage.py` as the only unresolved conflict (nested conflict markers from prior merge attempt)
+- Resolved `storage.py`: adopted feature branch's cleaner `__init__` (`Client | None = None` type hint, explicit `if supabase is None:` guard) while preserving all layer methods from dev
+- Committed merge and pushed `dev` → `origin/dev` (`bd374f9..79c19eb`)
+
+**Files modified**:
+- `backend/app/core/storage.py` — conflict resolved
+
+---
+
+### Prompt 52 — Enhance upload page with presigned URL flow
+
+**Raw**:
+> now my local is updated..I want to start with the development of file upload UI in the frontend..can you work on this task Enhance existing upload page — call POST /datasets/upload-url to get presigned URLs and update all the relevant code in the local..show me the test result and update prompt file with this prompt
+
+**Interpreted intent**: Fix all bugs in the existing upload UI flow, wire it fully to `POST /datasets/upload-url`, add per-file XHR progress, HITL redirect, pipeline store integration, TypeScript types, and run type check to prove correctness.
+
+**Changes made**:
+
+| File | What changed |
+|------|-------------|
+| `frontend/types/api.ts` | Added `UploadURLRequest`, `UploadURLResponse`, `IngestResponse` interfaces |
+| `frontend/store/pipelineStore.ts` | Added `setJobId` action to the pipeline store |
+| `frontend/lib/pipelineApi.ts` | Added generic return types `<UploadURLResponse>` and `<IngestResponse>` to `uploadUrl` and `triggerIngest` |
+| `frontend/components/user/UploadZone.tsx` | Full rewrite — fixed critical bugs: `data.upload_urls[file.name]` (was `data.urls[i]`), removed `formats` from request body (backend rejects it), added XHR per-file progress bars, pipeline store integration, `setJobId`, redirect to `/validate/${dataset_id}` on `awaiting_hitl_merge`, proper cleanup of poll interval, Parquet MIME type support, `AlertCircle` error banner |
+| `frontend/app/(user)/page.tsx` | Enhanced — added `useRouter` redirect to `/validate/${dataset_id}` on HITL status, `setDataset`/`setJobId`/`setPipelineStatus` pipeline store integration, `useRef` interval cleanup on unmount, domain PATCH fire-and-forget, Parquet support in dropzone accept map, better status/error display |
+
+**Test result**: `npx tsc --noEmit` — **0 errors** after `npm install`
+
+**Branch**: `smita/feat-frontend-fileupload`
+
+---
+
 ### Prompt 50 — Log prompts, push to repo, update .gitignore
 
 **Raw**:
