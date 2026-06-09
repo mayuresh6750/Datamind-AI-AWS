@@ -1,6 +1,5 @@
 "use client"
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
 import { DomainCard } from '@/components/user/DomainCard'
@@ -16,18 +15,24 @@ const DOMAINS = [
 ] as const
 
 export default function DomainPage() {
-  const router = useRouter()
-  const setAuth = useAuthStore.getState().setAuth
   const [selected, setSelected] = useState<string>('finance')
   const [descriptor, setDescriptor] = useState('')
   const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
   const handleContinue = async () => {
     setSaving(true)
-    await api.patch('/datasets/me/domain', {
-      domain: selected,
-      descriptor: selected === 'other' ? descriptor : undefined,
-    })
-    setSaving(false)
+    setErr('')
+    try {
+      await api.patch('/datasets/me/domain', {
+        domain: selected,
+        other_descriptor: selected === 'other' ? descriptor : undefined,
+      })
+    } catch (e: any) {
+      setErr(e.response?.data?.detail || e.message || 'Failed to save domain.')
+      setSaving(false)
+      return
+    }
     const st = useAuthStore.getState()
     st.setAuth({
       token: st.token,
@@ -37,8 +42,10 @@ export default function DomainPage() {
       email: st.email,
       activeDomain: selected,
     })
-    router.push('/upload')
+    setSaving(false)
+    window.location.href = '/'
   }
+
   return (
     <div className='max-w-2xl'>
       <h1 className='text-xl font-semibold mb-1'>Welcome to DataMind</h1>
@@ -51,7 +58,10 @@ export default function DomainPage() {
       {selected === 'other' && (
         <input className='w-full border rounded px-3 py-2 text-sm mb-4' placeholder='Describe your domain (e.g. Legal ops, Education)' value={descriptor} onChange={(e) => setDescriptor(e.target.value)} />
       )}
-      <Button onClick={handleContinue} disabled={saving}>{saving ? 'Saving…' : `Continue with ${DOMAINS.find((d) => d.id === selected)?.label}`}</Button>
+      {err && <p className='text-sm text-red-600 mb-2'>{err}</p>}
+      <Button onClick={handleContinue} disabled={saving}>
+        {saving ? 'Saving…' : `Continue with ${DOMAINS.find((d) => d.id === selected)?.label}`}
+      </Button>
     </div>
   )
 }

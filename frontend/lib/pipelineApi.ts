@@ -1,9 +1,12 @@
 import { api } from './api'
-import type { MergePlanDecision, CleaningDecision, IntentRequest } from '@/types/api'
+import type { UploadURLResponse, IngestResponse, MergePlanDecision, CleaningDecision, IntentRequest } from '@/types/api'
 import type { DashboardSpec } from '@/types/pipeline'
 
-export const uploadUrl = (filenames: string[]) => api.post('/datasets/upload-url', { filenames })
-export const triggerIngest = (datasetId: string) => api.post(`/datasets/${datasetId}/ingest`)
+export const uploadUrl = (filenames: string[]) =>
+  api.post<UploadURLResponse>('/datasets/upload-url', { filenames })
+
+export const triggerIngest = (datasetId: string) =>
+  api.post<IngestResponse>(`/datasets/${datasetId}/ingest`)
 export const getMergePlan = (datasetId: string) => api.get(`/datasets/${datasetId}/merge-plan`)
 export const confirmMerge = (datasetId: string, d: MergePlanDecision) => api.post(`/datasets/${datasetId}/merge-plan/decision`, d)
 export const getCleaningPlan = (datasetId: string) => api.get(`/datasets/${datasetId}/cleaning-plan`)

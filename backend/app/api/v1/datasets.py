@@ -38,11 +38,21 @@ async def update_domain(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    from app.models.db import User
+    from app.models.db import Tenant, User
     result = await db.execute(select(User).where(User.user_id == uuid.UUID(current_user["user_id"])))
     user = result.scalar_one_or_none()
     if user is None:
-        raise HTTPException(status_code=404, detail="User not found.")
+        # Auto-provision tenant + user on first domain selection
+        tenant = Tenant(name=current_user.get("email", "default"))
+        db.add(tenant)
+        await db.flush()
+        user = User(
+            user_id=uuid.UUID(current_user["user_id"]),
+            tenant_id=tenant.tenant_id,
+            email=current_user.get("email", ""),
+            role=current_user.get("role", "user"),
+        )
+        db.add(user)
     user.active_domain = body.domain
     user.other_domain_descriptor = body.other_descriptor
     await db.commit()
