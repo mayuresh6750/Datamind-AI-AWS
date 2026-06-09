@@ -27,7 +27,7 @@ export default function Navbar() {
       >
         Logout
       </button>
-      <button onClick={() => router.push('/app/domain')} className="ml-2 px-3 py-1 text-sm rounded border border-white/20">Change domain</button>
+      <button onClick={() => router.push('/domain')} className="ml-2 px-3 py-1 text-sm rounded border border-white/20">Change domain</button>
     </nav>
   );
 }

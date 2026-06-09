@@ -279,7 +279,7 @@ export default function UploadPage() {
             setUploading(false);
 
             if (job.status === "awaiting_hitl_merge") {
-              router.push(`/validate/${dataset_id}`);
+              window.location.href = `/validate/${dataset_id}`;
             } else if (job.status === "error") {
               const msg = job.error ?? "Pipeline failed.";
               setError(msg);

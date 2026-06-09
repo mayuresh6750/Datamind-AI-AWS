@@ -23,7 +23,7 @@ export default function DomainModal({ onClose }: { onClose?: () => void }) {
     setSaving(true)
     await api.patch('/datasets/me/domain', {
       domain: selected,
-      descriptor: selected === 'other' ? descriptor : undefined,
+      other_descriptor: selected === 'other' ? descriptor : undefined,
     })
     const st = useAuthStore.getState()
     st.setAuth({
@@ -36,7 +36,7 @@ export default function DomainModal({ onClose }: { onClose?: () => void }) {
     })
     setSaving(false)
     if (onClose) onClose()
-    else router.push('/app')
+    else window.location.href = '/'
   }
 
   return (

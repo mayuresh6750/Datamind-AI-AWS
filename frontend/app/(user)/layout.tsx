@@ -51,7 +51,7 @@ export default function UserLayout({ children }: { children: React.ReactNode }) 
       {/* Only show the domain modal after Zustand has hydrated from localStorage.
           Without this guard the modal flashes on every page load because the store
           starts with activeDomain = null before the persisted value is read. */}
-      {hydrated && !activeDomain && <DomainModal />}
+      {hydrated && !activeDomain && pathname !== '/domain' && <DomainModal />}
       <header className="border-b px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-6">
           <Link href="/" className="font-bold text-lg">

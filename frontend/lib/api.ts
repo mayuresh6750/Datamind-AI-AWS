@@ -1,8 +1,10 @@
 import axios from 'axios'
 import { useAuthStore } from '@/store/authStore'
 
+// Use a relative base URL so all requests go through the Next.js rewrite
+// proxy (/api/v1/* → http://localhost:8000/api/v1/*), avoiding CORS entirely.
 export const api = axios.create({
-  baseURL: (process.env.NEXT_PUBLIC_API_URL ?? '') + '/api/v1',
+  baseURL: '/api/v1',
   headers: { 'Content-Type': 'application/json' },
 })
 
@@ -21,7 +23,7 @@ api.interceptors.response.use(
       try {
         const refresh = useAuthStore.getState().refreshToken
         const { data } = await axios.post(
-          (process.env.NEXT_PUBLIC_API_URL ?? '') + '/api/v1/auth/refresh',
+          '/api/v1/auth/refresh',
           { refresh_token: refresh }
         )
         useAuthStore.getState().setAuth(data)
@@ -29,7 +31,7 @@ api.interceptors.response.use(
         return api(original)
       } catch (e) {
         useAuthStore.getState().clearAuth()
-        if (typeof window !== 'undefined') window.location.href = '/(auth)/login'
+        if (typeof window !== 'undefined') window.location.href = '/login'
       }
     }
     return Promise.reject(err)
