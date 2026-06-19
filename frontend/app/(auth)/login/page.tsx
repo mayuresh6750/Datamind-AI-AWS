@@ -1,10 +1,17 @@
 "use client"
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import { supabase } from '@/lib/supabase'
 
+function extractLoginError(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  return 'Login failed. Please try again.';
+}
+
 export default function LoginPage() {
   const setAuth = useAuthStore.getState().setAuth
+  const router = useRouter()
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
   const [err, setErr]           = useState('')
@@ -20,10 +27,21 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       })
-      const body = await res.json()
+
+      let body: any = {}
+      try {
+        body = await res.json()
+      } catch {
+        if (!res.ok) {
+          setErr(`Server error (${res.status}). Please check if backend is running.`)
+          return
+        }
+        setErr('Invalid response from server.')
+        return
+      }
+
       if (!res.ok) {
         setErr(body.detail ?? 'Invalid credentials')
-        setLoading(false)
         return
       }
       // Sync session into Supabase client so middleware cookies are written
@@ -40,9 +58,11 @@ export default function LoginPage() {
         email,
         activeDomain: null,
       })
-      window.location.href = body.role === 'admin' ? '/admin/health' : '/domain'
-    } catch (e: any) {
-      setErr(e.message || 'Login failed')
+      // Use Next.js router for client-side navigation (no full page reload)
+      router.push(body.role === 'admin' ? '/admin' : '/domain')
+    } catch (e: unknown) {
+      setErr(extractLoginError(e))
+    } finally {
       setLoading(false)
     }
   }
@@ -54,18 +74,35 @@ export default function LoginPage() {
         <p className='text-sm text-slate-500'>Enter your email and password to continue.</p>
         <div className='space-y-1'>
           <label className='text-sm font-medium'>Email</label>
-          <input type='email' value={email} onChange={e => setEmail(e.target.value)}
-            className='w-full border rounded-md px-3 py-2 text-sm' placeholder='you@example.com' />
+          <input
+            type='email'
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            className='w-full border rounded-md px-3 py-2 text-sm'
+            placeholder='you@example.com'
+          />
         </div>
         <div className='space-y-1'>
           <label className='text-sm font-medium'>Password</label>
-          <input type='password' value={password} onChange={e => setPassword(e.target.value)}
+          <input
+            type='password'
+            value={password}
+            onChange={e => setPassword(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSignIn()}
-            className='w-full border rounded-md px-3 py-2 text-sm' placeholder='••••••••' />
+            className='w-full border rounded-md px-3 py-2 text-sm'
+            placeholder='••••••••'
+          />
         </div>
-        {err && <p className='text-sm text-red-600'>{err}</p>}
-        <button onClick={handleSignIn} disabled={loading}
-          className='w-full rounded-md bg-blue-600 py-2.5 text-sm font-medium text-white disabled:opacity-50'>
+        {err && (
+          <p role='alert' aria-live='assertive' className='text-sm text-red-600'>
+            {err}
+          </p>
+        )}
+        <button
+          onClick={handleSignIn}
+          disabled={loading}
+          className='w-full rounded-md bg-blue-600 py-2.5 text-sm font-medium text-white disabled:opacity-50'
+        >
           {loading ? 'Signing in…' : 'Sign in'}
         </button>
       </div>

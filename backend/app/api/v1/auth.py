@@ -47,7 +47,7 @@ async def login(body: LoginRequest):
     if res.session is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
-    role = res.user.user_metadata.get("role", "user") if res.user else "user"
+    role = (res.user.user_metadata or {}).get("role", "user") if res.user else "user"
     return AuthResponse(
         access_token=res.session.access_token,
         refresh_token=res.session.refresh_token,
@@ -64,7 +64,7 @@ async def refresh(refresh_token: str):
     except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token.")
 
-    role = res.user.user_metadata.get("role", "user") if res.user else "user"
+    role = (res.user.user_metadata or {}).get("role", "user") if res.user else "user"
     return AuthResponse(
         access_token=res.session.access_token,
         refresh_token=res.session.refresh_token,
