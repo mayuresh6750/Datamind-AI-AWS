@@ -96,9 +96,10 @@ async def run_cleaning_plan_pipeline(dataset_id: str, merge_decision: dict, job_
 
     from app.core.database import AsyncSessionLocal
     from app.core.storage import StorageClient
-    from app.models.db import Dataset, HITLDecision
+    from app.models.db import Dataset, HITLDecision, PipelineRun
     from app.agents.cleaning_plan import CleaningPlanAgent
     from app.agents.ingestion import IngestionAgent
+    from app.core.llm import LLMClient
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
@@ -130,7 +131,9 @@ async def run_cleaning_plan_pipeline(dataset_id: str, merge_decision: dict, job_
             user = user_result.scalar_one()
             domain = user.active_domain
 
-            cleaning_agent = CleaningPlanAgent()
+            # One shared LLMClient — its total_tokens/total_cost_usd accumulate across all agent calls
+            llm_client = LLMClient()
+            cleaning_agent = CleaningPlanAgent(llm=llm_client)
             plan = await cleaning_agent.propose(all_rows, profiles, domain)
 
             hitl = HITLDecision(
@@ -142,10 +145,26 @@ async def run_cleaning_plan_pipeline(dataset_id: str, merge_decision: dict, job_
             )
             db.add(hitl)
             dataset.status = "awaiting_hitl_cleaning"
+
+            # Persist token usage for this run — previously these columns were always NULL
+            run = PipelineRun(
+                dataset_id=uuid.UUID(dataset_id),
+                status="complete",
+                llm_provider=llm_client._provider,
+                total_llm_tokens=llm_client.total_tokens,
+                total_llm_cost_usd=llm_client.total_cost_usd,
+            )
+            db.add(run)
             await db.commit()
 
             update_job(job_id, "complete", progress_pct=100, current_step="awaiting_hitl_cleaning")
-            log.info("cleaning_plan_pipeline_complete", dataset_id=dataset_id, steps=len(plan.steps))
+            log.info(
+                "cleaning_plan_pipeline_complete",
+                dataset_id=dataset_id,
+                steps=len(plan.steps),
+                total_tokens=llm_client.total_tokens,
+                total_cost_usd=round(llm_client.total_cost_usd, 6),
+            )
 
         except Exception as exc:
             await db.rollback()
@@ -284,7 +303,7 @@ async def run_intent_analysis_pipeline(dataset_id: str, question: str, user_id: 
     update_job(job_id, "running", progress_pct=10, current_step="parsing_intent")
 
     from app.core.database import AsyncSessionLocal
-    from app.models.db import Dataset, User
+    from app.models.db import Dataset, PipelineRun, User
     from app.agents.intent import IntentAgent
     from app.agents.analysis import AnalysisAgent
     from app.agents.dashboard_agent import DashboardAgent
@@ -292,6 +311,7 @@ async def run_intent_analysis_pipeline(dataset_id: str, question: str, user_id: 
     from app.agents.ingestion import IngestionAgent
     from app.models.schemas import ColumnProfile
     from app.core.storage import StorageClient
+    from app.core.llm import LLMClient
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
@@ -311,28 +331,46 @@ async def run_intent_analysis_pipeline(dataset_id: str, question: str, user_id: 
             ingestion = IngestionAgent()
             profiles = ingestion.profile_columns(cleaned_rows)
 
-            intent_agent = IntentAgent()
+            # One shared LLMClient passed to all 4 agents — accumulates tokens for the full run
+            llm_client = LLMClient()
+
+            intent_agent = IntentAgent(llm=llm_client)
             spec = await intent_agent.parse(question, profiles, domain)
             update_job(job_id, "running", progress_pct=40, current_step="running_analysis")
 
-            analysis_agent = AnalysisAgent()
+            analysis_agent = AnalysisAgent(llm=llm_client)
             table_name = f"ds_{dataset_id.replace('-', '_')}"
             numeric_results = await analysis_agent.run_numeric(spec, table_name, db, domain)
             textual_results = await analysis_agent.run_textual(question, dataset_id, db)
 
             update_job(job_id, "running", progress_pct=75, current_step="generating_dashboard")
-            dashboard_agent = DashboardAgent()
+            dashboard_agent = DashboardAgent(llm=llm_client)
             dashboard = await dashboard_agent.generate(spec, numeric_results, textual_results, domain)
 
-            insights_agent = InsightsAgent()
+            insights_agent = InsightsAgent(llm=llm_client)
             final_dashboard = await insights_agent.enrich(dashboard, domain)
 
             from app.api.v1.dashboards import cache_dashboard
             cache_dashboard(dataset_id, final_dashboard)
 
+            # Persist token usage for this run — previously these columns were always NULL
+            run = PipelineRun(
+                dataset_id=uuid.UUID(dataset_id),
+                status="complete",
+                llm_provider=llm_client._provider,
+                total_llm_tokens=llm_client.total_tokens,
+                total_llm_cost_usd=llm_client.total_cost_usd,
+            )
+            db.add(run)
+
             await db.commit()
             update_job(job_id, "complete", progress_pct=100, current_step="dashboard_ready")
-            log.info("intent_analysis_pipeline_complete", dataset_id=dataset_id)
+            log.info(
+                "intent_analysis_pipeline_complete",
+                dataset_id=dataset_id,
+                total_tokens=llm_client.total_tokens,
+                total_cost_usd=round(llm_client.total_cost_usd, 6),
+            )
 
         except Exception as exc:
             await db.rollback()

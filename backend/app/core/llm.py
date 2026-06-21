@@ -18,12 +18,35 @@ _PROVIDER_ROUTES: dict[str, str] = {
 # that remains available even when the primary model is rate-limited or unavailable.
 _FALLBACK_MODEL = "gemini/gemini-2.0-flash-001"
 
+# Cost per 1 million tokens (USD). Input and output priced separately.
+# Source: https://ai.google.dev/gemini-api/docs/pricing
+_MODEL_PRICING_PER_1M: dict[str, dict[str, float]] = {
+    "gemini-2.0-flash":     {"input": 0.10,  "output": 0.40},
+    "gemini-2.0-flash-001": {"input": 0.10,  "output": 0.40},
+    "gemini-1.5-flash":     {"input": 0.075, "output": 0.30},
+    "gemini-1.5-pro":       {"input": 3.50,  "output": 10.50},
+}
+_DEFAULT_PRICING: dict[str, float] = {"input": 0.10, "output": 0.40}
+
+
+def _calculate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """Return USD cost for one LLM call. Strips provider prefix before lookup."""
+    short_model = model.split("/")[-1]
+    pricing = _MODEL_PRICING_PER_1M.get(short_model, _DEFAULT_PRICING)
+    return (prompt_tokens * pricing["input"] + completion_tokens * pricing["output"]) / 1_000_000
+
 
 class LLMClient:
     """
     LiteLLM-compatible abstraction layer.
     All agents call this; no agent hardcodes a provider.
     Per-tenant provider config is resolved at call time.
+
+    Token tracking:
+        total_tokens   — cumulative (prompt + completion) tokens across all calls on this instance
+        total_cost_usd — cumulative USD cost across all calls on this instance
+    Pass one shared LLMClient to all agents in a pipeline run so the worker
+    can read totals at the end and persist them to PipelineRun.
     """
 
     def __init__(self, tenant_id: str | None = None) -> None:
@@ -31,6 +54,14 @@ class LLMClient:
         self._provider = settings.llm_provider
         self._model = settings.llm_model
         self._api_key = settings.llm_api_key
+        # Cumulative counters — accumulated across every call made on this instance
+        self.total_tokens: int = 0
+        self.total_cost_usd: float = 0.0
+
+    def _accumulate(self, model: str, prompt_tokens: int, completion_tokens: int) -> None:
+        """Add token counts and cost from one call to the running totals."""
+        self.total_tokens += prompt_tokens + completion_tokens
+        self.total_cost_usd += _calculate_cost(model, prompt_tokens, completion_tokens)
 
     async def structured_completion(
         self,
@@ -70,6 +101,10 @@ class LLMClient:
                 result = schema.model_validate_json(raw)
 
                 latency_ms = int((time.monotonic() - start) * 1000)
+                prompt_tokens = response.usage.prompt_tokens if response.usage else 0
+                completion_tokens = response.usage.completion_tokens if response.usage else 0
+                self._accumulate(model, prompt_tokens, completion_tokens)
+
                 log.info(
                     "llm_call_success",
                     agent=agent_name,
@@ -77,8 +112,9 @@ class LLMClient:
                     model=model,
                     attempt=attempt,
                     latency_ms=latency_ms,
-                    tokens_in=response.usage.prompt_tokens if response.usage else 0,
-                    tokens_out=response.usage.completion_tokens if response.usage else 0,
+                    tokens_in=prompt_tokens,
+                    tokens_out=completion_tokens,
+                    total_tokens=self.total_tokens,
                 )
                 return result
 
@@ -114,13 +150,18 @@ class LLMClient:
             result = schema.model_validate_json(raw)  # parse fallback response into the schema
 
             latency_ms = int((time.monotonic() - start) * 1000)
+            prompt_tokens = response.usage.prompt_tokens if response.usage else 0
+            completion_tokens = response.usage.completion_tokens if response.usage else 0
+            self._accumulate(_FALLBACK_MODEL, prompt_tokens, completion_tokens)
+
             log.info(
                 "llm_fallback_success",  # distinct log event so it's easy to monitor fallback usage
                 agent=agent_name,
                 fallback_model=_FALLBACK_MODEL,
                 latency_ms=latency_ms,
-                tokens_in=response.usage.prompt_tokens if response.usage else 0,
-                tokens_out=response.usage.completion_tokens if response.usage else 0,
+                tokens_in=prompt_tokens,
+                tokens_out=completion_tokens,
+                total_tokens=self.total_tokens,
             )
             return result  # return the fallback result — caller is unaware a fallback was used
 
