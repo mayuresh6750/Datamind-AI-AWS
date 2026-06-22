@@ -41,11 +41,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 # ─── Supabase client (service role — server-side only) ───────────────────────
-supabase_client: Client = create_client(
-    settings.supabase_url,
-    settings.supabase_service_role_key,
-)
-
-
 def get_supabase() -> Client:
-    return supabase_client
+    return create_client(
+        settings.supabase_url,
+        settings.supabase_service_role_key,
+    )

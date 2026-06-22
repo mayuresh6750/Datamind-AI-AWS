@@ -12,8 +12,8 @@ export async function middleware(request: NextRequest) {
     request: { headers: request.headers },
   });
 
-  // Keep the Supabase client alive so it can refresh session cookies,
-  // but do NOT redirect — the client-side UserLayout handles auth protection.
+  // Keep the Supabase client alive so it can refresh session cookies.
+  let session: { user?: { user_metadata?: { role?: string } } } | null = null;
   try {
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -37,14 +37,35 @@ export async function middleware(request: NextRequest) {
       }
     );
     // Refresh session if expired — required for Server Components.
-    await supabase.auth.getSession();
+    const { data } = await supabase.auth.getSession();
+    session = data.session;
   } catch {
     // If Supabase is unreachable or the key format is unsupported, just pass through.
+  }
+
+  // ── Server-side admin route guard ────────────────────────────────────────
+  // Protect all /admin/* routes at the edge before any React component renders.
+  // The client-side layout guard is a second layer of defence, not the first.
+  if (request.nextUrl.pathname.startsWith('/admin')) {
+    if (!session) {
+      // Not authenticated — send to login
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = '/login';
+      return NextResponse.redirect(loginUrl);
+    }
+    const role = session.user?.user_metadata?.role;
+    if (role !== 'admin') {
+      // Authenticated but not admin — send to home
+      const homeUrl = request.nextUrl.clone();
+      homeUrl.pathname = '/';
+      return NextResponse.redirect(homeUrl);
+    }
   }
 
   return response;
 }
 
 export const config = {
-  matcher: ['/', '/validate/:path*', '/clean/:path*', '/domain'],
+  // Include /admin/* in the middleware matcher so the guard runs server-side.
+  matcher: ['/', '/admin/:path*', '/validate/:path*', '/clean/:path*', '/domain'],
 };
