@@ -51,6 +51,49 @@ class DashboardAgent:
             schema=DashboardSpec.model_json_schema(),
         )
 
-        dashboard = await self.llm.structured_completion(prompt, DashboardSpec, agent_name="dashboard")
+        try:
+            dashboard = await self.llm.structured_completion(prompt, DashboardSpec, agent_name="dashboard")
+        except Exception as exc:
+            log.warning("dashboard_llm_failed", error=str(exc))
+            dashboard = self._heuristic_dashboard(spec, numeric_results, textual_results)
+
         log.info("dashboard_generated", domain=domain, kpi_count=len(dashboard.kpi_cards), chart_count=len(dashboard.charts))
         return dashboard
+
+    def _heuristic_dashboard(
+        self,
+        spec: AnalysisSpec,
+        numeric_results: list[dict],
+        textual_results: list[dict],
+    ) -> DashboardSpec:
+        from app.models.schemas import ChartSpec, KPICard
+
+        kpi_cards: list[KPICard] = []
+        for measure in spec.measures[:3]:
+            vals = [r.get(measure) for r in numeric_results if r.get(measure) is not None]
+            if vals:
+                try:
+                    avg = sum(float(v) for v in vals) / len(vals)
+                    kpi_cards.append(KPICard(label=f"Avg {measure}", value=f"{avg:.2f}"))
+                except (ValueError, TypeError):
+                    pass
+        if not kpi_cards:
+            kpi_cards.append(KPICard(label="Total Records", value=str(len(numeric_results) or len(textual_results))))
+
+        charts: list[ChartSpec] = []
+        if numeric_results and spec.dimensions and spec.measures:
+            dim, measure = spec.dimensions[0], spec.measures[0]
+            chart_data = [{"x": str(r.get(dim, "")), "y": r.get(measure, 0)} for r in numeric_results[:20]]
+            charts.append(ChartSpec(chart_type="bar", title=f"{measure} by {dim}", data=chart_data, x_field="x", y_field="y"))
+        if not charts:
+            data = numeric_results[:20] or [{"key": r.get("content", "")[:60], "value": r.get("similarity", 0)} for r in textual_results[:20]]
+            first_key = list(data[0].keys())[0] if data else "key"
+            last_key = list(data[0].keys())[-1] if data else "value"
+            charts.append(ChartSpec(chart_type="table", title="Data Overview", data=data, x_field=first_key, y_field=last_key))
+
+        return DashboardSpec(
+            kpi_cards=kpi_cards,
+            charts=charts,
+            narrative=f"Analysis of '{spec.restatement}' returned {len(numeric_results)} records.",
+            recommended_action="Refine your question or explore the charts for deeper insights.",
+        )

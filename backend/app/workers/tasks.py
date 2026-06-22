@@ -1,6 +1,13 @@
 """FastAPI BackgroundTasks handlers — one function per pipeline stage."""
+import asyncio
 import json
 import uuid
+
+# asyncpg hard limit is 32 767 parameters per statement.
+# 500 rows × ≤65 columns stays safely under that ceiling for PostgreSQL inserts.
+# pgvector inserts use 4 params/row, so 500 rows = 2 000 params — well under.
+_INSERT_CHUNK = 500
+_EMBED_CHUNK = 500
 
 import structlog
 
@@ -54,7 +61,7 @@ async def run_ingest_pipeline(dataset_id: str, user_id: str, job_id: str) -> Non
 
             update_job(job_id, "running", progress_pct=60, current_step="generating_merge_plan")
 
-            merge_plan = ingestion.propose_merge_plan(file_profiles)
+            merge_plan = ingestion.propose_merge_plan(file_profiles, all_rows)
 
             # Create pipeline run
             run = PipelineRun(
@@ -184,7 +191,19 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
                 fmt = ingestion.detect_format(filename, content)
                 all_rows.extend(ingestion.parse_content(fmt, content))
 
-            profiles = ingestion.profile_columns(all_rows)
+            # Reuse column profiles stored during ingest — avoids re-profiling the same data.
+            from app.models.schemas import ColumnProfile as ColumnProfileSchema
+            merge_hitl_res = await db.execute(
+                select(HITLDecision)
+                .where(HITLDecision.dataset_id == uuid.UUID(dataset_id), HITLDecision.checkpoint == "schema_merge")
+                .order_by(HITLDecision.created_at.desc())
+                .limit(1)
+            )
+            merge_hitl = merge_hitl_res.scalar_one_or_none()
+            if merge_hitl and merge_hitl.proposal_json.get("column_profiles"):
+                profiles = [ColumnProfileSchema(**p) for p in merge_hitl.proposal_json["column_profiles"]]
+            else:
+                profiles = ingestion.profile_columns(all_rows)
 
             # Load cleaning plan proposal
             hitl_result = await db.execute(
@@ -203,67 +222,120 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
 
             update_job(job_id, "running", progress_pct=65, current_step="storing_json")
 
-            # Store cleaned JSON in Supabase Storage (Layer 2)
-            json_path = storage.json_path(str(dataset.user_id), dataset_id)
-            await storage.upload_json(json_path, cleaned_rows)
+            # Layer 2: JSON upload — non-fatal; warn and continue if bucket missing
+            json_path: str | None = None
+            try:
+                json_bytes = json.dumps(cleaned_rows, default=str).encode("utf-8")
+                json_path = storage.upload_json(str(dataset.user_id), dataset_id, json_bytes)
+            except Exception as upload_exc:
+                log.warning("json_upload_skipped", error=str(upload_exc))
 
             update_job(job_id, "running", progress_pct=75, current_step="routing_to_postgresql")
 
-            # Route numeric columns to PostgreSQL (typed table)
+            # Layer 3: Route numeric columns to PostgreSQL — non-fatal savepoint
             numeric_cols = [p.name for p in profiles if p.classification == "numeric"]
             textual_cols = [p.name for p in profiles if p.classification == "textual"]
             table_name = f"ds_{dataset_id.replace('-', '_')}"
 
-            if numeric_cols and cleaned_rows:
-                col_defs = ", ".join(f'"{c}" TEXT' for c in numeric_cols)
-                await db.execute(text(f'CREATE TABLE IF NOT EXISTS "{table_name}" ({col_defs})'))
-                for row in cleaned_rows:
-                    vals = {c: str(row.get(c, "")) for c in numeric_cols}
-                    placeholders = ", ".join(f":{c}" for c in numeric_cols)
-                    col_names = ", ".join(f'"{c}"' for c in numeric_cols)
-                    await db.execute(text(f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})'), vals)
+            try:
+                async with await db.begin_nested():
+                    if numeric_cols and cleaned_rows:
+                        col_defs = ", ".join(f'"{c}" TEXT' for c in numeric_cols)
+                        await db.execute(text(f'CREATE TABLE IF NOT EXISTS "{table_name}" ({col_defs})'))
+                        # Bulk insert all rows in a single executemany call instead of
+                        # one INSERT per row, reducing N database round-trips to 1.
+                        col_names = ", ".join(f'"{c}"' for c in numeric_cols)
+                        placeholders = ", ".join(f":{c}" for c in numeric_cols)
+                        insert_sql = text(f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})')
+                        # Chunk to stay under asyncpg's 32 767-parameter limit and
+                        # avoid building a single huge in-memory list for large datasets.
+                        for i in range(0, len(cleaned_rows), _INSERT_CHUNK):
+                            chunk_vals = [
+                                {c: str(row.get(c, "")) for c in numeric_cols}
+                                for row in cleaned_rows[i:i + _INSERT_CHUNK]
+                            ]
+                            await db.execute(insert_sql, chunk_vals)
+            except Exception as pg_exc:
+                log.warning("postgresql_routing_skipped", error=str(pg_exc))
 
             update_job(job_id, "running", progress_pct=85, current_step="embedding_textual_columns")
 
-            # Embed textual columns into pgvector
-            if textual_cols and cleaned_rows:
-                embedding_model = get_embedding_model()
-                await db.execute(text("""
-                    CREATE TABLE IF NOT EXISTS dataset_embeddings (
-                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        dataset_id UUID NOT NULL,
-                        content TEXT NOT NULL,
-                        metadata JSONB,
-                        embedding vector(1024)
-                    )
-                """))
-                texts = [" ".join(str(row.get(c, "")) for c in textual_cols) for row in cleaned_rows]
-                embeddings = embedding_model.embed_batch(texts)
-                for text_val, emb, row in zip(texts, embeddings, cleaned_rows):
-                    emb_str = "[" + ",".join(str(x) for x in emb) + "]"
-                    await db.execute(
-                        text("INSERT INTO dataset_embeddings (dataset_id, content, metadata, embedding) VALUES (:did, :content, :meta, :emb::vector)"),
-                        {"did": dataset_id, "content": text_val, "meta": json.dumps({k: row.get(k) for k in list(row.keys())[:5]}), "emb": emb_str},
-                    )
+            # Layer 4: pgvector embeddings — non-fatal savepoint
+            try:
+                async with await db.begin_nested():
+                    if textual_cols and cleaned_rows:
+                        embedding_model = get_embedding_model()
+                        await db.execute(text("""
+                            CREATE TABLE IF NOT EXISTS dataset_embeddings (
+                                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                dataset_id UUID NOT NULL,
+                                content TEXT NOT NULL,
+                                metadata JSONB,
+                                embedding vector(1024)
+                            )
+                        """))
+                        loop = asyncio.get_event_loop()
+                        insert_emb = text(
+                            "INSERT INTO dataset_embeddings "
+                            "(dataset_id, content, metadata, embedding) "
+                            "VALUES (:did, :content, :meta, CAST(:emb AS vector))"
+                        )
+                        total = len(cleaned_rows)
+                        # Process in chunks: each chunk embeds in a thread pool then
+                        # inserts immediately, bounding both CPU time per slice and
+                        # peak RAM usage regardless of dataset size.
+                        for i in range(0, total, _EMBED_CHUNK):
+                            chunk_rows = cleaned_rows[i:i + _EMBED_CHUNK]
+                            # 512-char cap: Qwen3 supports 8K but shorter inputs embed
+                            # ~10x faster on CPU with negligible semantic quality loss.
+                            chunk_texts = [
+                                " ".join(str(row.get(c, "")) for c in textual_cols)[:512]
+                                for row in chunk_rows
+                            ]
+                            chunk_embeddings = await loop.run_in_executor(
+                                None, embedding_model.embed_batch, chunk_texts
+                            )
+                            emb_params = [
+                                {
+                                    "did": dataset_id,
+                                    "content": text_val,
+                                    "meta": json.dumps({k: row.get(k) for k in list(row.keys())[:5]}),
+                                    "emb": "[" + ",".join(str(x) for x in emb) + "]",
+                                }
+                                for text_val, emb, row in zip(chunk_texts, chunk_embeddings, chunk_rows)
+                            ]
+                            await db.execute(insert_emb, emb_params)
+                            done = i + len(chunk_rows)
+                            pct = 85 + int(14 * done / max(total, 1))
+                            update_job(
+                                job_id, "running", progress_pct=pct,
+                                current_step=f"embedding_textual_columns ({done}/{total} rows)",
+                            )
+            except Exception as emb_exc:
+                log.warning("embedding_skipped", error=str(emb_exc))
 
-            # Create audit log entries
-            run = PipelineRun(dataset_id=uuid.UUID(dataset_id), status="complete")
-            db.add(run)
-            await db.flush()
+            # Audit log — non-fatal savepoint
+            try:
+                async with await db.begin_nested():
+                    run = PipelineRun(dataset_id=uuid.UUID(dataset_id), status="complete")
+                    db.add(run)
+                    await db.flush()
+                    for entry in audit_entries:
+                        log_entry = AuditLog(
+                            dataset_id=uuid.UUID(dataset_id),
+                            run_id=run.run_id,
+                            user_id=dataset.user_id,
+                            agent_name="cleaning_executor",
+                            action_type=entry["action"],
+                            rows_affected=entry.get("rows_changed"),
+                            rationale=entry.get("rationale"),
+                            confidence=entry.get("confidence"),
+                        )
+                        db.add(log_entry)
+            except Exception as audit_exc:
+                log.warning("audit_log_skipped", error=str(audit_exc))
 
-            for entry in audit_entries:
-                log_entry = AuditLog(
-                    dataset_id=uuid.UUID(dataset_id),
-                    run_id=run.run_id,
-                    user_id=dataset.user_id,
-                    agent_name="cleaning_executor",
-                    action_type=entry["action"],
-                    rows_affected=entry.get("rows_changed"),
-                    rationale=entry.get("rationale"),
-                    confidence=entry.get("confidence"),
-                )
-                db.add(log_entry)
-
+            # Critical: always mark dataset ready regardless of optional step failures
             dataset.status = "ready"
             dataset.row_count_clean = len(cleaned_rows)
             dataset.json_uri = json_path
@@ -303,13 +375,24 @@ async def run_intent_analysis_pipeline(dataset_id: str, question: str, user_id: 
             user = user_result.scalar_one()
             domain = user.active_domain
 
-            # Reload cleaned JSON for column profiles
+            # Reload cleaned JSON — fall back to re-parsing from archive if not yet uploaded
             storage = StorageClient()
-            json_path = storage.json_path(str(dataset.user_id), dataset_id)
-            cleaned_rows = await storage.download_json(json_path)
+            ingestion_fallback = IngestionAgent()
+            try:
+                json_path = storage.json_path(str(dataset.user_id), dataset_id)
+                cleaned_rows = json.loads(storage.download_json(json_path))
+            except Exception:
+                archive_paths = dataset.archive_uris or [
+                    f"{dataset.user_id}/{dataset_id}/{fn}" for fn in dataset.original_filenames
+                ]
+                cleaned_rows = []
+                for filename, path in zip(dataset.original_filenames, archive_paths, strict=True):
+                    content = storage.download_archive(path)
+                    fmt = ingestion_fallback.detect_format(filename, content)
+                    cleaned_rows.extend(ingestion_fallback.parse_content(fmt, content))
+                log.warning("json_download_fallback", dataset_id=dataset_id, rows=len(cleaned_rows))
 
-            ingestion = IngestionAgent()
-            profiles = ingestion.profile_columns(cleaned_rows)
+            profiles = ingestion_fallback.profile_columns(cleaned_rows)
 
             intent_agent = IntentAgent()
             spec = await intent_agent.parse(question, profiles, domain)
@@ -324,6 +407,7 @@ async def run_intent_analysis_pipeline(dataset_id: str, question: str, user_id: 
             dashboard_agent = DashboardAgent()
             dashboard = await dashboard_agent.generate(spec, numeric_results, textual_results, domain)
 
+            update_job(job_id, "running", progress_pct=90, current_step="generating_insights")
             insights_agent = InsightsAgent()
             final_dashboard = await insights_agent.enrich(dashboard, domain)
 

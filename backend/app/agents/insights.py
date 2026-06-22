@@ -42,11 +42,23 @@ class InsightsAgent:
             dashboard=dashboard.model_dump_json(indent=2),
         )
 
-        output = await self.llm.structured_completion(prompt, InsightsOutput, agent_name="insights")
+        try:
+            output = await self.llm.structured_completion(prompt, InsightsOutput, agent_name="insights")
+            enriched = dashboard.model_copy(update={
+                "narrative": output.narrative,
+                "recommended_action": output.recommended_action,
+            })
+        except Exception as exc:
+            log.warning("insights_llm_failed", error=str(exc))
+            enriched = self._heuristic_insights(dashboard, domain)
 
-        enriched = dashboard.model_copy(update={
-            "narrative": output.narrative,
-            "recommended_action": output.recommended_action,
-        })
         log.info("insights_generated", domain=domain)
         return enriched
+
+    def _heuristic_insights(self, dashboard: DashboardSpec, domain: str) -> DashboardSpec:
+        kpi_summary = " ".join(f"{k.label} is {k.value}." for k in dashboard.kpi_cards[:2])
+        narrative = f"For this {domain} dataset: {kpi_summary} Review the charts above for trends and distributions."
+        return dashboard.model_copy(update={
+            "narrative": narrative,
+            "recommended_action": "Explore the visualizations and refine your question for more targeted insights.",
+        })

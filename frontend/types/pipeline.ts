@@ -1,62 +1,55 @@
-export type ColumnRouting = 'relational' | 'vector' | 'ambiguous'
-export interface ColumnSchema {
+// Matches backend/app/models/schemas.py: ColumnProfile, MergePlan (column_routing
+// is the only thing not sent by the backend — it's derived client-side from
+// `classification` so the user can override per-column before submitting).
+export type ColumnClassification = 'numeric' | 'textual' | 'ambiguous'
+export interface ColumnProfile {
 	name: string
-	inferred_type: string
-	routing: ColumnRouting
+	dtype: string
 	null_count: number
 	distinct_count: number
-	sample_values: string[]
-}
-export interface FileSchema {
-	filename: string
-	format: 'csv' | 'xlsx' | 'json' | 'parquet'
-	row_count: number
-	columns: ColumnSchema[]
-	encoding: string
+	avg_length: number | null
+	classification: ColumnClassification
 }
 export interface MergePlan {
-	files: FileSchema[]
-	merge_strategy: 'single' | 'union' | 'join' | 'separate'
-	merge_key_column: string | null
+	strategy: 'single' | 'union' | 'join' | 'separate'
+	join_key: string | null
 	confidence: number
-	rationale: string
-	column_routing: Record<string, ColumnRouting>
-	cartesian_risk: boolean
+	column_profiles: ColumnProfile[]
 }
-export interface CleaningAction {
-	id: string
-	type: 'dedup' | 'impute' | 'coerce' | 'outlier_flag' | 'drop_column'
-	category: string
-	title: string
+// Matches backend/app/models/schemas.py: CleaningStep, CleaningPlan
+export interface CleaningStep {
+	step_id: number
+	action: 'deduplicate' | 'impute' | 'coerce_type' | 'flag_outlier'
+	column: string | null
+	method: string
 	rationale: string
 	confidence: number
 	rows_affected: number
-	before_sample: Record<string, any>[]
-	after_sample: Record<string, any>[]
-	impute_options?: string[]
+	before_sample: Record<string, any> | null
+	after_sample: Record<string, any> | null
 }
 export interface CleaningPlan {
-	dataset_id: string
-	actions: CleaningAction[]
-	generated_at: string
-	llm_provider: string
-	llm_model: string
+	steps: CleaningStep[]
+	total_rows_before: number
+	total_rows_after: number
 }
-export interface VegaLiteSpec {
-	mark: 'bar' | 'line' | 'table'
-	encoding: {
-		x: { field: string; type: string }
-		y: { field: string; type: string }
-	}
+export interface KPICard {
+	label: string
+	value: string
+	change?: string | null
+	change_pct?: number | null
+}
+export interface ChartSpec {
+	chart_type: 'bar' | 'line' | 'table'
+	title: string
+	data: Record<string, any>[]
+	x_field: string
+	y_field: string
+	color_field?: string | null
 }
 export interface DashboardSpec {
-	id: string
-	intent_id: string
-	kpi_cards: { label: string; value: string; delta?: string; trend?: 'up' | 'down' | 'flat' }[]
-	charts: { title: string; spec: VegaLiteSpec; data: any[] }[]
+	kpi_cards: KPICard[]
+	charts: ChartSpec[]
 	narrative: string
-	next_action: string
-	domain: string
-	quality_score: number
-	generated_at: string
+	recommended_action: string
 }

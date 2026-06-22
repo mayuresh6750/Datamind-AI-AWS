@@ -63,12 +63,16 @@ class AnalysisAgent:
         class SQLOutput(BaseModel):
             sql: str
 
-        sql_result = await self.llm.structured_completion(
-            f"Return JSON: {{\"sql\": \"<your SELECT here>\"}} for: {prompt}",
-            SQLOutput,
-            agent_name="analysis_sql_gen",
-        )
-        sql = sql_result.sql.strip().rstrip(";")
+        try:
+            sql_result = await self.llm.structured_completion(
+                f"Return JSON: {{\"sql\": \"<your SELECT here>\"}} for: {prompt}",
+                SQLOutput,
+                agent_name="analysis_sql_gen",
+            )
+            sql = sql_result.sql.strip().rstrip(";")
+        except Exception as exc:
+            log.warning("analysis_sql_gen_llm_failed", error=str(exc))
+            sql = self._heuristic_sql(spec, table_name)
 
         # Safety: only allow SELECT statements
         if not sql.strip().upper().startswith("SELECT"):
@@ -84,6 +88,13 @@ class AnalysisAgent:
             log.error("analysis_sql_failed", error=str(exc), sql=sql[:200])
             return []
 
+    def _heuristic_sql(self, spec: AnalysisSpec, table_name: str) -> str:
+        # Only use measures in the numeric table; dimensions may be textual cols not present there
+        if spec.measures:
+            aggs = ", ".join(f'AVG(CAST("{m}" AS FLOAT)) AS "{m}"' for m in spec.measures)
+            return f'SELECT {aggs} FROM "{table_name}" LIMIT 100'
+        return f'SELECT * FROM "{table_name}" LIMIT 100'
+
     async def run_textual(
         self,
         question: str,
@@ -96,10 +107,10 @@ class AnalysisAgent:
         embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
 
         sql = text("""
-            SELECT content, metadata, 1 - (embedding <=> :embedding::vector) AS similarity
+            SELECT content, metadata, 1 - (embedding <=> CAST(:embedding AS vector)) AS similarity
             FROM dataset_embeddings
             WHERE dataset_id = :dataset_id
-            ORDER BY embedding <=> :embedding::vector
+            ORDER BY embedding <=> CAST(:embedding AS vector)
             LIMIT :top_k
         """)
 

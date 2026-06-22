@@ -13,12 +13,15 @@ import { usePipelineStore } from "@/store/pipelineStore";
 
 const DOMAINS = ["finance", "healthcare", "retail", "marketing", "operations", "other"] as const;
 
-const TERMINAL_STATUSES = [
+// Backend job response has two distinct fields: `status` is the job
+// lifecycle ("queued" | "running" | "complete" | "error"), while
+// `current_step` holds the pipeline/HITL stage ("awaiting_hitl_merge", etc).
+// These terminal values live in `current_step`, not `status`.
+const TERMINAL_STEPS = [
   "awaiting_hitl_merge",
   "awaiting_hitl_cleaning",
   "awaiting_intent",
   "ready",
-  "error",
 ];
 
 type FileStatus = "idle" | "uploading" | "done" | "error";
@@ -273,14 +276,17 @@ export default function UploadPage() {
           );
           setPipelineStatus(job.status as any);
 
-          if (TERMINAL_STATUSES.includes(job.status) || attempts > 90) {
+          const jobFailed = job.status === "error";
+          const stepIsTerminal = job.current_step !== null && TERMINAL_STEPS.includes(job.current_step);
+
+          if (jobFailed || stepIsTerminal || attempts > 90) {
             clearInterval(pollerRef.current!);
             pollerRef.current = null;
             setUploading(false);
 
-            if (job.status === "awaiting_hitl_merge") {
+            if (job.current_step === "awaiting_hitl_merge") {
               window.location.href = `/validate/${dataset_id}`;
-            } else if (job.status === "error") {
+            } else if (jobFailed) {
               const msg = job.error ?? "Pipeline failed.";
               setError(msg);
               setPipelineError(msg);

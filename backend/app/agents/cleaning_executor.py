@@ -70,7 +70,8 @@ class CleaningExecutorAgent:
         seen: set[str] = set()
         result: list[dict] = []
         for row in rows:
-            key = str(sorted(row.items()))
+            # Convert keys/values to str before sorting to avoid NoneType comparison errors
+            key = str(sorted((str(k), str(v)) for k, v in row.items()))
             if key not in seen:
                 seen.add(key)
                 result.append(row)

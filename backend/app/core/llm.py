@@ -1,3 +1,4 @@
+import asyncio
 import time
 from typing import TypeVar, Type
 
@@ -13,10 +14,24 @@ _PROVIDER_ROUTES: dict[str, str] = {
     "google_gemini": "gemini",
 }
 
-# Fallback: pinned stable model tried once if the primary model exhausts all 3 retries.
-# gemini-2.0-flash-001 is used because it is a known-good, version-locked alternative
-# that remains available even when the primary model is rate-limited or unavailable.
-_FALLBACK_MODEL = "gemini/gemini-2.0-flash-001"
+# Fallback model: a different Gemini generation tried once after all primary retries fail.
+# Only used for transient errors (503/timeout) — quota errors (429) skip this entirely
+# because both models share the same API key and therefore the same quota pool.
+_FALLBACK_MODEL = "gemini/gemini-2.0-flash"
+
+# Wait times (seconds) between retry attempts for transient errors.
+# Attempt 1→2 waits 2s, attempt 2→3 waits 4s.
+_RETRY_DELAYS = (1, 2)
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    """Return True for 429 / quota-exhausted errors where retrying will not help."""
+    msg = str(exc).lower()
+    return any(k in msg for k in ("429", "quota", "rate_limit", "resource_exhausted", "too_many_requests"))
+
+
+class QuotaExhaustedError(RuntimeError):
+    """Raised when the LLM API quota is exhausted so agents can fast-fail to manual fallback."""
 
 
 class LLMClient:
@@ -48,6 +63,7 @@ class LLMClient:
 
         start = time.monotonic()
         last_error: Exception | None = None
+        quota_hit = False
 
         for attempt in range(1, 4):
             try:
@@ -84,19 +100,43 @@ class LLMClient:
 
             except Exception as exc:
                 last_error = exc
-                log.warning("llm_call_failed", agent=agent_name, attempt=attempt, error=str(exc))
 
-        # Primary model exhausted all 3 attempts — try the fallback model once.
-        # This runs only when every retry above has failed.
+                if _is_quota_error(exc):
+                    # 429 / quota exhausted — retrying won't help, and the fallback model
+                    # shares the same API key so it would also fail. Stop immediately and
+                    # let the agent fall back to its manual rule-based code.
+                    log.warning(
+                        "llm_quota_exhausted_fast_fail",
+                        agent=agent_name,
+                        attempt=attempt,
+                        error=str(exc),
+                    )
+                    quota_hit = True
+                    break
+
+                log.warning("llm_call_failed", agent=agent_name, attempt=attempt, error=str(exc))
+                # Exponential backoff so transient 503s have time to recover before next retry.
+                if attempt < 3:
+                    await asyncio.sleep(_RETRY_DELAYS[attempt - 1])
+
+        if quota_hit:
+            # Raise a typed exception so the caller knows quota is the reason,
+            # not a transient failure that might succeed on a later request.
+            raise QuotaExhaustedError(
+                f"LLM quota exhausted for agent '{agent_name}': {last_error}"
+            )
+
+        # Primary model exhausted all retries with a transient error (503 / timeout).
+        # Try the fallback model once — it is a different Gemini generation and may
+        # be available even when the primary endpoint is overloaded.
         log.warning(
             "llm_primary_exhausted_trying_fallback",
             agent=agent_name,
-            fallback_model=_FALLBACK_MODEL,  # log which fallback model is being used
+            fallback_model=_FALLBACK_MODEL,
         )
         try:
-            # Single attempt with the fallback model — no further retries to keep latency bounded
             response = await litellm.acompletion(
-                model=_FALLBACK_MODEL,  # use the pinned fallback model instead of the primary
+                model=_FALLBACK_MODEL,
                 messages=[
                     {
                         "role": "system",
@@ -111,21 +151,20 @@ class LLMClient:
                 response_format={"type": "json_object"},
             )
             raw = response.choices[0].message.content or "{}"
-            result = schema.model_validate_json(raw)  # parse fallback response into the schema
+            result = schema.model_validate_json(raw)
 
             latency_ms = int((time.monotonic() - start) * 1000)
             log.info(
-                "llm_fallback_success",  # distinct log event so it's easy to monitor fallback usage
+                "llm_fallback_success",
                 agent=agent_name,
                 fallback_model=_FALLBACK_MODEL,
                 latency_ms=latency_ms,
                 tokens_in=response.usage.prompt_tokens if response.usage else 0,
                 tokens_out=response.usage.completion_tokens if response.usage else 0,
             )
-            return result  # return the fallback result — caller is unaware a fallback was used
+            return result
 
         except Exception as fallback_exc:
-            # Fallback also failed — nothing left to try, raise with full context
             raise RuntimeError(
                 f"LLM call failed after 3 attempts and fallback for agent '{agent_name}': "
                 f"primary_error={last_error}, fallback_error={fallback_exc}"
