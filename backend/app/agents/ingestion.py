@@ -40,7 +40,8 @@ class IngestionAgent:
     def parse_csv(self, content: bytes) -> list[dict]:
         text = content.decode("utf-8-sig", errors="replace")
         reader = csv.DictReader(io.StringIO(text, newline=""))
-        return list(reader)
+        # csv.DictReader stores overflow values under key None; strip those artifacts
+        return [{k: v for k, v in row.items() if k is not None} for row in reader]
 
     def parse_json(self, content: bytes) -> list[dict]:
         data = json.loads(content)
@@ -120,12 +121,12 @@ class IngestionAgent:
             if numeric_ratio >= 0.9:
                 classification = "numeric"
                 dtype = "float"
-            elif distinct_count <= MAX_CARDINALITY_FOR_STRUCTURED:
-                classification = "numeric"
-                dtype = "categorical"
             elif avg_length >= MIN_AVG_LENGTH_FOR_TEXTUAL or distinct_count > 0.5 * len(rows):
                 classification = "textual"
                 dtype = "text"
+            elif distinct_count <= MAX_CARDINALITY_FOR_STRUCTURED:
+                classification = "numeric"
+                dtype = "categorical"
             else:
                 classification = "ambiguous"
                 dtype = "text"
@@ -141,7 +142,11 @@ class IngestionAgent:
 
         return profiles
 
-    def propose_merge_plan(self, file_profiles: list[tuple[str, list[ColumnProfile]]]) -> MergePlan:
+    def propose_merge_plan(
+        self,
+        file_profiles: list[tuple[str, list[ColumnProfile]]],
+        all_rows: list[dict] | None = None,
+    ) -> MergePlan:
         if len(file_profiles) == 1:
             return MergePlan(
                 strategy="single",
@@ -152,7 +157,10 @@ class IngestionAgent:
         # Check if all files share the same columns (UNION candidate)
         all_col_sets = [set(p.name for p in profiles) for _, profiles in file_profiles]
         if all(s == all_col_sets[0] for s in all_col_sets):
-            all_profiles = file_profiles[0][1]
+            # Recompute profiles over the combined row set so stats (null_count,
+            # distinct_count, avg_length, classification) reflect all files stacked
+            # together, not just the first file.
+            all_profiles = self.profile_columns(all_rows) if all_rows is not None else file_profiles[0][1]
             return MergePlan(strategy="union", confidence=0.92, column_profiles=all_profiles)
 
         # Different schemas — JOIN candidate; find common key column

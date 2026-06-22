@@ -12,21 +12,23 @@ export interface IngestResponse {
   status: string
 }
 
+// Matches backend/app/models/schemas.py: MergePlanDecision
 export interface MergePlanDecision {
 	approved: boolean
-	merge_strategy: string
-	merge_key_column: string | null
-	column_routing: Record<string, string>
+	merge_strategy_override?: string | null
+	join_key_override?: string | null
+	excluded_columns?: string[]
+	type_routing_overrides?: Record<string, string>
 }
-export interface CleaningDecision {
-	step_id: string
-	status: 'approved' | 'modified' | 'rejected'
-	override: string | null
+// Matches backend/app/models/schemas.py: CleaningPlanDecision
+export interface CleaningPlanDecision {
+	approved_step_ids: number[]
+	step_modifications: Record<number, Record<string, any>>
 }
+// Matches backend/app/models/schemas.py: IntentRequest
 export interface IntentRequest {
-	intent_text: string
-	language?: string
-	preferred_chart_types?: string[]
+	dataset_id: string
+	question: string
 }
 export interface IntentResponse {
 	intent_id: string

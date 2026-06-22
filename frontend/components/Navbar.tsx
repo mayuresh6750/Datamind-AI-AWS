@@ -7,14 +7,12 @@ import { useAuthStore } from '@/store/authStore'
 export default function Navbar() {
   const router = useRouter();
   const activeDomain = useAuthStore((s) => s.activeDomain)
+  const clearAuth = useAuthStore((s) => s.clearAuth)
 
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (!error) {
-      router.push('/login');
-    } else {
-      console.error('Logout failed:', error.message);
-    }
+    await supabase.auth.signOut().catch(() => {})
+    clearAuth()
+    router.push('/login')
   };
 
   return (

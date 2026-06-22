@@ -1,3 +1,6 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 import structlog
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,9 +25,22 @@ log = structlog.get_logger()
 
 limiter = Limiter(key_func=get_remote_address)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Pre-warm the embedding model so the first pipeline run doesn't pay
+    # the 5-20 second cold-start cost of loading Qwen3-Embedding-0.6B from disk.
+    from app.core.embeddings import get_embedding_model
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, get_embedding_model)
+    log.info("embedding_model_warmed")
+    yield
+
+
 app = FastAPI(
     title="DataMind AI",
     version="0.1.0",
+    lifespan=lifespan,
     docs_url="/docs" if not settings.is_production else None,
     redoc_url=None,
 )

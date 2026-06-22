@@ -40,7 +40,7 @@ export default function LoginPage() {
         email,
         activeDomain: null,
       })
-      window.location.href = body.role === 'admin' ? '/admin/health' : '/domain'
+      window.location.href = '/'
     } catch (e: any) {
       setErr(e.message || 'Login failed')
       setLoading(false)
