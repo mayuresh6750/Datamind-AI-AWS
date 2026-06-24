@@ -14,7 +14,9 @@ from app.models.db import Dataset, HITLDecision, Tenant, User
 from app.models.schemas import (
     CleaningPlan,
     CleaningPlanDecision,
+    DatasetSummary,
     DomainUpdateRequest,
+    FileRowCount,
     IngestRequest,
     IntentRequest,
     JobResponse,
@@ -246,6 +248,85 @@ async def submit_cleaning_decision(
 
     await db.commit()
     return JobResponse(job_id=job_id, status="queued")
+
+
+# ─── Row-Count Summary ───────────────────────────────────────────────────────
+
+@router.get("/{dataset_id}/summary", response_model=DatasetSummary)
+async def get_dataset_summary(
+    dataset_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return per-file source counts, merged row count, clean row count, and dropped rows.
+
+    Available as soon as ingest completes (status ≥ awaiting_hitl_merge).
+    clean_row_count and dropped_rows are populated after cleaning executes.
+    """
+    dataset = await _get_owned_dataset(db, dataset_id, current_user["user_id"])
+    source_files = [FileRowCount(**f) for f in (dataset.source_file_counts or [])]
+    merged = dataset.row_count_raw or 0
+    clean = dataset.row_count_clean
+    dropped = (merged - clean) if clean is not None else None
+    return DatasetSummary(
+        dataset_id=str(dataset_id),
+        source_files=source_files,
+        merged_row_count=merged,
+        clean_row_count=clean,
+        dropped_rows=dropped,
+        status=dataset.status,
+    )
+
+
+# ─── Data Preview ────────────────────────────────────────────────────────────
+
+@router.get("/{dataset_id}/preview")
+async def preview_dataset(
+    dataset_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    rows: int = 10,
+):
+    """Return first N rows of the cleaned JSON plus the PostgreSQL table columns."""
+    import json as _json
+    from app.core.storage import StorageClient
+    from sqlalchemy import text
+
+    dataset = await _get_owned_dataset(db, dataset_id, current_user["user_id"])
+    storage = StorageClient()
+
+    sample_rows: list[dict] = []
+    try:
+        json_path = storage.json_path(str(dataset.user_id), str(dataset_id))
+        all_rows = _json.loads(storage.download_json(json_path))
+        sample_rows = all_rows[:rows]
+    except Exception as exc:
+        sample_rows = [{"error": f"Could not load cleaned JSON: {exc}"}]
+
+    table_name = f"ds_{str(dataset_id).replace('-', '_')}"
+    pg_columns: list = []
+    try:
+        col_res = await db.execute(
+            text(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_name = :t AND table_schema = 'public' ORDER BY ordinal_position"
+            ),
+            {"t": table_name},
+        )
+        pg_columns = [{"column": row[0], "pg_type": row[1]} for row in col_res.fetchall()]
+    except Exception as exc:
+        pg_columns = [{"error": str(exc)}]
+
+    return {
+        "dataset_id": str(dataset_id),
+        "status": dataset.status,
+        "row_count_raw": dataset.row_count_raw,
+        "row_count_clean": dataset.row_count_clean,
+        "source_file_counts": dataset.source_file_counts,
+        "pg_table": table_name,
+        "pg_columns": pg_columns,
+        "sample_rows": sample_rows,
+    }
 
 
 # ─── Intent (HITL #3) ────────────────────────────────────────────────────────

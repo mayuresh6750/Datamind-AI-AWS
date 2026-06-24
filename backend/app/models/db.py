@@ -75,6 +75,7 @@ class Dataset(Base):
     json_uri: Mapped[str | None] = mapped_column(Text)
     row_count_raw: Mapped[int | None] = mapped_column(BigInteger)
     row_count_clean: Mapped[int | None] = mapped_column(BigInteger)
+    source_file_counts: Mapped[dict | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="uploaded")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

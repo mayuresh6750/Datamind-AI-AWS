@@ -38,6 +38,18 @@ class DomainUpdateRequest(BaseModel):
 
 # ─── Dataset / Upload ─────────────────────────────────────────────────────────
 
+class FileRowCount(BaseModel):
+    filename: str
+    row_count: int
+
+class DatasetSummary(BaseModel):
+    dataset_id: str
+    source_files: list[FileRowCount]
+    merged_row_count: int
+    clean_row_count: Optional[int] = None
+    dropped_rows: Optional[int] = None
+    status: str
+
 class UploadURLRequest(BaseModel):
     filenames: list[str]
 
@@ -68,6 +80,8 @@ class MergePlan(BaseModel):
     join_key: Optional[str] = None
     confidence: float
     column_profiles: list[ColumnProfile]
+    source_file_counts: list[FileRowCount] = []
+    merged_row_count: int = 0
 
 class MergePlanDecision(BaseModel):
     approved: bool

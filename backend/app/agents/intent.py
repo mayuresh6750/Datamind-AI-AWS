@@ -60,37 +60,48 @@ class IntentAgent:
     def _heuristic_parse(self, question: str, profiles: list[ColumnProfile]) -> AnalysisSpec:
         q = question.lower()
 
-        # Try to match column names mentioned in the question — split on underscores and
-        # check if any word token from the column name appears in the question text.
         def _col_score(name: str) -> int:
             tokens = [t for t in name.lower().replace("-", "_").split("_") if len(t) > 2]
             return sum(1 for t in tokens if t in q)
 
         scored = sorted(profiles, key=lambda p: _col_score(p.name), reverse=True)
 
+        # Only genuine numeric (float/int) columns can be measures — NOT categoricals.
+        # A column with classification="numeric" and dtype="categorical" (e.g. Department)
+        # must be treated as a dimension, not a measure; doing AVG("Department") would crash.
+        _numeric_dtypes = {"float", "int", "int64", "float64", "numeric"}
         matched_measures = [
             p.name for p in scored
-            if p.classification == "numeric" and _col_score(p.name) > 0
+            if p.classification == "numeric" and p.dtype in _numeric_dtypes and _col_score(p.name) > 0
         ][:2]
         matched_dims = [
             p.name for p in scored
-            if p.classification in ("textual", "ambiguous") and _col_score(p.name) > 0
+            if (p.classification in ("textual", "ambiguous") or p.dtype == "categorical")
+            and _col_score(p.name) > 0
         ][:2]
 
-        # Fall back to first-N if nothing matched
-        measures = matched_measures or [
-            p.name for p in profiles if p.classification == "numeric" and p.dtype == "float"
-        ][:2] or [p.name for p in profiles if p.classification == "numeric"][:2]
-        dimensions = matched_dims or [
-            p.name for p in profiles if p.classification in ("textual", "ambiguous")
-        ][:2] or ([profiles[0].name] if profiles else [])
+        # Detect count-type questions — no numeric measure needed, just GROUP BY dimensions.
+        is_count_q = any(k in q for k in ("count", "how many", "number of", "frequency", "distribution", "wise count", "per ", "breakdown"))
 
-        # Pick chart type from question keywords
+        if is_count_q:
+            measures: list[str] = []
+            dimensions = matched_dims or [
+                p.name for p in profiles if p.dtype == "categorical"
+            ][:2] or [p.name for p in profiles if p.classification in ("textual", "ambiguous")][:2]
+        else:
+            measures = matched_measures or [
+                p.name for p in profiles if p.classification == "numeric" and p.dtype in _numeric_dtypes
+            ][:2]
+            dimensions = matched_dims or [
+                p.name for p in profiles if p.dtype == "categorical"
+            ][:2] or [p.name for p in profiles if p.classification in ("textual", "ambiguous")][:2]
+
+        if not dimensions and profiles:
+            dimensions = [profiles[0].name]
+
         if any(k in q for k in ("trend", "over time", "by month", "by week", "by day", "timeline")):
             chart_types = ["line", "bar"]
-        elif any(k in q for k in ("count", "how many", "number of", "frequency")):
-            chart_types = ["bar", "table"]
-        elif any(k in q for k in ("compare", "vs", "versus", "breakdown", "by")):
+        elif is_count_q or any(k in q for k in ("compare", "vs", "versus", "breakdown", "by")):
             chart_types = ["bar", "table"]
         else:
             chart_types = ["bar", "table"]
