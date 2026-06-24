@@ -16,6 +16,68 @@ from app.api.v1.jobs import register_job, update_job
 log = structlog.get_logger()
 
 
+def _apply_merge(
+    parsed_files: dict[str, list[dict]],
+    proposal: dict,
+    decision: dict,
+) -> list[dict]:
+    """Apply the HITL-confirmed merge strategy to produce a single dataset.
+
+    - union: vertical stack of all files (same schema required)
+    - join:  left-join on a key column; first file is the left table
+    - single: only one file, return it as-is
+    - separate: files have incompatible schemas; stack with a _source_file tag
+    """
+    strategy = decision.get("merge_strategy_override") or proposal.get("strategy") or "union"
+    join_key = decision.get("join_key_override") or proposal.get("join_key")
+    excluded: set[str] = set(decision.get("excluded_columns") or [])
+
+    file_names = list(parsed_files.keys())
+    if not file_names:
+        return []
+
+    if strategy in ("single",) or len(file_names) == 1:
+        rows: list[dict] = list(parsed_files[file_names[0]])
+
+    elif strategy == "union":
+        rows = []
+        for file_rows in parsed_files.values():
+            rows.extend(file_rows)
+
+    elif strategy == "join" and join_key:
+        # Left-join: largest file drives (fact/transaction table), smaller files are lookups.
+        # Using upload order would make a 15-row dimension table drive a 100-row fact table,
+        # losing all but one transaction per dimension row.
+        driver = max(parsed_files, key=lambda f: len(parsed_files[f]))
+        lookup_files = [f for f in file_names if f != driver]
+        rows = list(parsed_files[driver])
+        for fname in lookup_files:
+            lookup: dict[str, dict] = {}
+            for r in parsed_files[fname]:
+                lookup[str(r.get(join_key, ""))] = r
+            merged: list[dict] = []
+            for row in rows:
+                right = lookup.get(str(row.get(join_key, "")), {})
+                merged_row = dict(row)
+                for col, val in right.items():
+                    if col != join_key:
+                        merged_row[col] = val
+                merged.append(merged_row)
+            rows = merged
+
+    else:
+        # separate / unknown — stack with a _source_file marker so rows stay distinguishable
+        rows = []
+        for fname, file_rows in parsed_files.items():
+            for row in file_rows:
+                rows.append({"_source_file": fname, **row})
+
+    if excluded:
+        rows = [{k: v for k, v in row.items() if k not in excluded} for row in rows]
+
+    return rows
+
+
 async def run_ingest_pipeline(dataset_id: str, user_id: str, job_id: str) -> None:
     """Detect format, parse files, profile columns, store merge plan in HITL table."""
     register_job(job_id)
@@ -39,6 +101,7 @@ async def run_ingest_pipeline(dataset_id: str, user_id: str, job_id: str) -> Non
             all_rows: list[dict] = []
             file_profiles = []
             file_formats: list[str] = []
+            per_file_counts: list[dict] = []
 
             update_job(job_id, "running", progress_pct=20, current_step="downloading_files")
 
@@ -54,6 +117,7 @@ async def run_ingest_pipeline(dataset_id: str, user_id: str, job_id: str) -> Non
                 fmt = ingestion.detect_format(filename, content)
                 rows = ingestion.parse_content(fmt, content)
 
+                per_file_counts.append({"filename": filename, "row_count": len(rows)})
                 profiles = ingestion.profile_columns(rows)
                 file_profiles.append((filename, profiles))
                 file_formats.append(fmt)
@@ -62,6 +126,13 @@ async def run_ingest_pipeline(dataset_id: str, user_id: str, job_id: str) -> Non
             update_job(job_id, "running", progress_pct=60, current_step="generating_merge_plan")
 
             merge_plan = ingestion.propose_merge_plan(file_profiles, all_rows)
+
+            # Enrich merge plan with per-file and merged row counts for HITL #1 display
+            from app.models.schemas import FileRowCount
+            from app.models.schemas import MergePlan as MergePlanSchema
+            enriched_plan = MergePlanSchema(
+                **{**merge_plan.model_dump(), "source_file_counts": per_file_counts, "merged_row_count": len(all_rows)}
+            )
 
             # Create pipeline run
             run = PipelineRun(
@@ -76,19 +147,36 @@ async def run_ingest_pipeline(dataset_id: str, user_id: str, job_id: str) -> Non
                 dataset_id=uuid.UUID(dataset_id),
                 user_id=uuid.UUID(user_id),
                 checkpoint="schema_merge",
-                proposal_json=merge_plan.model_dump(),
+                proposal_json=enriched_plan.model_dump(),
                 decision_json={},
             )
             db.add(hitl)
 
-            # Update dataset status and format
+            # Update dataset status, format, and row counts
             dataset.status = "awaiting_hitl_merge"
             dataset.detected_format = file_formats[0] if file_formats else "csv"
             dataset.row_count_raw = len(all_rows)
+            dataset.source_file_counts = per_file_counts
 
             await db.commit()
+
+            # Upload _summary.json — non-fatal; Postgres is the source of truth.
+            # merged_row_count here is the raw sum; it is updated to the actual post-merge
+            # count once the cleaning executor runs and applies the confirmed strategy.
+            try:
+                summary = {
+                    "dataset_id": dataset_id,
+                    "source_files": per_file_counts,
+                    "proposed_merge_strategy": enriched_plan.strategy,
+                    "source_combined_row_count": len(all_rows),
+                    "status": "awaiting_hitl_merge",
+                }
+                storage.upload_summary(user_id, dataset_id, json.dumps(summary).encode())
+            except Exception as summary_exc:
+                log.warning("summary_upload_skipped", error=str(summary_exc))
+
             update_job(job_id, "complete", progress_pct=100, current_step="awaiting_hitl_merge")
-            log.info("ingest_pipeline_complete", dataset_id=dataset_id, rows=len(all_rows))
+            log.info("ingest_pipeline_complete", dataset_id=dataset_id, rows=len(all_rows), files=len(per_file_counts))
 
         except Exception as exc:
             await db.rollback()
@@ -121,13 +209,24 @@ async def run_cleaning_plan_pipeline(dataset_id: str, merge_decision: dict, job_
             archive_paths = dataset.archive_uris or [
                 f"{dataset.user_id}/{dataset_id}/{filename}" for filename in dataset.original_filenames
             ]
-            all_rows: list[dict] = []
+            parsed_files: dict[str, list[dict]] = {}
             for filename, path in zip(dataset.original_filenames, archive_paths, strict=True):
                 content = storage.download_archive(path)
                 fmt = ingestion.detect_format(filename, content)
-                rows = ingestion.parse_content(fmt, content)
-                all_rows.extend(rows)
+                parsed_files[filename] = ingestion.parse_content(fmt, content)
 
+            # Load the HITL #1 proposal to get the default strategy/join_key
+            merge_hitl_res = await db.execute(
+                select(HITLDecision)
+                .where(HITLDecision.dataset_id == uuid.UUID(dataset_id), HITLDecision.checkpoint == "schema_merge")
+                .order_by(HITLDecision.created_at.desc())
+                .limit(1)
+            )
+            merge_hitl = merge_hitl_res.scalar_one_or_none()
+            merge_proposal = merge_hitl.proposal_json if merge_hitl else {}
+
+            # Apply the user-confirmed merge strategy before generating the cleaning plan
+            all_rows = _apply_merge(parsed_files, merge_proposal, merge_decision)
             profiles = ingestion.profile_columns(all_rows)
 
             update_job(job_id, "running", progress_pct=50, current_step="generating_cleaning_plan")
@@ -204,13 +303,13 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
             archive_paths = dataset.archive_uris or [
                 f"{dataset.user_id}/{dataset_id}/{filename}" for filename in dataset.original_filenames
             ]
-            all_rows: list[dict] = []
+            parsed_files: dict[str, list[dict]] = {}
             for filename, path in zip(dataset.original_filenames, archive_paths, strict=True):
                 content = storage.download_archive(path)
                 fmt = ingestion.detect_format(filename, content)
-                all_rows.extend(ingestion.parse_content(fmt, content))
+                parsed_files[filename] = ingestion.parse_content(fmt, content)
 
-            # Reuse column profiles stored during ingest — avoids re-profiling the same data.
+            # Load the HITL #1 proposal + decision to apply the correct merge strategy.
             from app.models.schemas import ColumnProfile as ColumnProfileSchema
             merge_hitl_res = await db.execute(
                 select(HITLDecision)
@@ -219,7 +318,23 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
                 .limit(1)
             )
             merge_hitl = merge_hitl_res.scalar_one_or_none()
-            if merge_hitl and merge_hitl.proposal_json.get("column_profiles"):
+            merge_proposal = merge_hitl.proposal_json if merge_hitl else {}
+            merge_decision_data = merge_hitl.decision_json if merge_hitl else {}
+
+            # Apply merge strategy — JOIN produces fewer rows than raw stack; UNION keeps all.
+            all_rows = _apply_merge(parsed_files, merge_proposal, merge_decision_data)
+
+            # Update row_count_raw to the actual post-merge count (may differ from ingest-time sum).
+            dataset.row_count_raw = len(all_rows)
+
+            # For JOIN/SEPARATE the column set changes after merge, so always re-profile.
+            # For UNION the stored profiles are accurate but re-profiling is cheap.
+            effective_strategy = (
+                merge_decision_data.get("merge_strategy_override")
+                or merge_proposal.get("strategy")
+                or "union"
+            )
+            if effective_strategy == "union" and merge_hitl and merge_hitl.proposal_json.get("column_profiles"):
                 profiles = [ColumnProfileSchema(**p) for p in merge_hitl.proposal_json["column_profiles"]]
             else:
                 profiles = ingestion.profile_columns(all_rows)
@@ -360,6 +475,29 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
             dataset.json_uri = json_path
             await db.commit()
 
+            # Update _summary.json — merged_row_count now reflects the actual post-merge count,
+            # not the raw sum of all source files.
+            try:
+                merged = dataset.row_count_raw or 0  # updated above to post-merge count
+                clean = len(cleaned_rows)
+                strategy = (
+                    merge_decision_data.get("merge_strategy_override")
+                    or merge_proposal.get("strategy")
+                    or "union"
+                )
+                summary = {
+                    "dataset_id": dataset_id,
+                    "source_files": dataset.source_file_counts or [],
+                    "merge_strategy": strategy,
+                    "merged_row_count": merged,
+                    "clean_row_count": clean,
+                    "dropped_rows": merged - clean,
+                    "status": "ready",
+                }
+                storage.upload_summary(str(dataset.user_id), dataset_id, json.dumps(summary).encode())
+            except Exception as summary_exc:
+                log.warning("summary_update_skipped", error=str(summary_exc))
+
             update_job(job_id, "complete", progress_pct=100, current_step="ready")
             log.info("cleaning_executor_pipeline_complete", dataset_id=dataset_id, cleaned_rows=len(cleaned_rows))
 
@@ -384,7 +522,7 @@ async def run_intent_analysis_pipeline(dataset_id: str, question: str, user_id: 
     from app.models.schemas import ColumnProfile
     from app.core.storage import StorageClient
     from app.core.llm import LLMClient
-    from sqlalchemy import select
+    from sqlalchemy import select, text
 
     async with AsyncSessionLocal() as db:
         try:
@@ -425,6 +563,14 @@ async def run_intent_analysis_pipeline(dataset_id: str, question: str, user_id: 
             table_name = f"ds_{dataset_id.replace('-', '_')}"
             numeric_results = await analysis_agent.run_numeric(spec, table_name, db, domain)
             textual_results = await analysis_agent.run_textual(question, dataset_id, db)
+            # Ensure the transaction is clean before committing pipeline_runs.
+            # run_numeric / run_textual use savepoints internally, but asyncpg can
+            # still leave the session in a bad state if the savepoint itself failed
+            # to roll back cleanly. A no-op SELECT confirms the session is usable.
+            try:
+                await db.execute(text("SELECT 1"))
+            except Exception:
+                await db.rollback()
 
             update_job(job_id, "running", progress_pct=75, current_step="generating_dashboard")
             dashboard_agent = DashboardAgent(llm=llm_client)

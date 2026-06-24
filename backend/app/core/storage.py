@@ -48,3 +48,13 @@ class StorageClient:
 
     def download_json(self, path: str) -> bytes:
         return self._sb.storage.from_(settings.storage_json_bucket).download(path)
+
+    def summary_path(self, user_id: str, dataset_id: str) -> str:
+        return f"{user_id}/{dataset_id}/_summary.json"
+
+    def upload_summary(self, user_id: str, dataset_id: str, data: bytes) -> str:
+        path = self.summary_path(user_id, dataset_id)
+        self._sb.storage.from_(settings.storage_json_bucket).upload(
+            path, data, {"content-type": "application/json", "upsert": "true"}
+        )
+        return path

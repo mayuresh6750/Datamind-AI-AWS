@@ -20,8 +20,11 @@ _PROVIDER_ROUTES: dict[str, str] = {
 _FALLBACK_MODEL = "gemini/gemini-2.0-flash"
 
 # Wait times (seconds) between retry attempts for transient errors.
-# Attempt 1→2 waits 2s, attempt 2→3 waits 4s.
 _RETRY_DELAYS = (1, 2)
+
+# Hard per-call timeout (seconds). Prevents a stalled Gemini connection from
+# blocking the event loop indefinitely across all 4 sequential agent calls.
+_CALL_TIMEOUT_SECONDS = 30
 
 
 def _is_quota_error(exc: Exception) -> bool:
@@ -112,6 +115,7 @@ class LLMClient:
                     ],
                     api_key=self._api_key,
                     response_format={"type": "json_object"},
+                    timeout=_CALL_TIMEOUT_SECONDS,
                 )
                 raw = response.choices[0].message.content or "{}"
                 result = schema.model_validate_json(raw)
@@ -185,6 +189,7 @@ class LLMClient:
                 ],
                 api_key=self._api_key,
                 response_format={"type": "json_object"},
+                timeout=_CALL_TIMEOUT_SECONDS,
             )
             raw = response.choices[0].message.content or "{}"
             result = schema.model_validate_json(raw)

@@ -12,15 +12,23 @@ You are a dashboard designer for a {domain} analytics platform.
 Analysis spec:
 {spec}
 
-Analysis results (first 20 rows):
-{results}
+SQL aggregation results (use these for KPI cards and charts — this is the primary data):
+{numeric_results}
+
+Semantic context excerpts (use ONLY for narrative — do NOT put similarity scores in charts):
+{textual_snippets}
+
+Rules:
+- If SQL results are non-empty: build KPI cards and charts from them. Show dimension values and aggregated measures.
+- If SQL results are empty: create one KPI card saying "No data matched" and one table chart with a single row explaining that.
+- NEVER use similarity scores or vector search content as chart data.
+- narrative: 2-3 sentences citing specific numbers from the SQL results.
+- recommended_action: one concrete next step.
 
 Generate a dashboard with:
 - 2-3 KPI cards (label, value as string, optional change and change_pct)
-- 2 charts (line or bar preferred; table as fallback)
+- 1-2 charts (bar preferred for group-by; table as fallback)
   - Each chart needs: chart_type, title, data (list of dicts), x_field, y_field, optional color_field
-- narrative: 2-3 sentence domain-flavoured business summary citing specific numbers
-- recommended_action: one concrete next step the user should take
 
 Return ONLY valid JSON matching this schema:
 {schema}
@@ -42,12 +50,13 @@ class DashboardAgent:
     ) -> DashboardSpec:
         import json
 
-        all_results = numeric_results[:20] + [{"text_result": r.get("content", "")} for r in textual_results[:5]]
-
         prompt = _DASHBOARD_PROMPT.format(
             domain=domain,
             spec=spec.model_dump_json(indent=2),
-            results=json.dumps(all_results, indent=2, default=str),
+            numeric_results=json.dumps(numeric_results[:20], indent=2, default=str),
+            textual_snippets=json.dumps(
+                [r.get("content", "")[:120] for r in textual_results[:3]], indent=2
+            ),
             schema=DashboardSpec.model_json_schema(),
         )
 
@@ -69,31 +78,94 @@ class DashboardAgent:
         from app.models.schemas import ChartSpec, KPICard
 
         kpi_cards: list[KPICard] = []
-        for measure in spec.measures[:3]:
-            vals = [r.get(measure) for r in numeric_results if r.get(measure) is not None]
-            if vals:
-                try:
-                    avg = sum(float(v) for v in vals) / len(vals)
-                    kpi_cards.append(KPICard(label=f"Avg {measure}", value=f"{avg:.2f}"))
-                except (ValueError, TypeError):
-                    pass
-        if not kpi_cards:
-            kpi_cards.append(KPICard(label="Total Records", value=str(len(numeric_results) or len(textual_results))))
+        if numeric_results:
+            first_row = numeric_results[0]
+            result_keys = list(first_row.keys())
+            # If result has a "count" column, show total transactions
+            if "count" in result_keys:
+                total = sum(int(r.get("count") or 0) for r in numeric_results)
+                kpi_cards.append(KPICard(label="Total Records", value=str(total)))
+                kpi_cards.append(KPICard(label="Groups", value=str(len(numeric_results))))
+            else:
+                # Numeric measure KPIs
+                for measure in spec.measures[:2]:
+                    # Case-insensitive match against result keys
+                    actual_key = next((k for k in result_keys if k.lower() == measure.lower()), None)
+                    if actual_key:
+                        vals = [r.get(actual_key) for r in numeric_results if r.get(actual_key) is not None]
+                        if vals:
+                            try:
+                                avg = sum(float(v) for v in vals) / len(vals)
+                                kpi_cards.append(KPICard(label=f"Avg {actual_key}", value=f"{avg:.2f}"))
+                            except (ValueError, TypeError):
+                                pass
+                if not kpi_cards:
+                    kpi_cards.append(KPICard(label="Groups", value=str(len(numeric_results))))
+        else:
+            kpi_cards.append(KPICard(label="No Data", value="—"))
 
         charts: list[ChartSpec] = []
-        if numeric_results and spec.dimensions and spec.measures:
-            dim, measure = spec.dimensions[0], spec.measures[0]
-            chart_data = [{"x": str(r.get(dim, "")), "y": r.get(measure, 0)} for r in numeric_results[:20]]
-            charts.append(ChartSpec(chart_type="bar", title=f"{measure} by {dim}", data=chart_data, x_field="x", y_field="y"))
-        if not charts:
-            data = numeric_results[:20] or [{"key": r.get("content", "")[:60], "value": r.get("similarity", 0)} for r in textual_results[:20]]
-            first_key = list(data[0].keys())[0] if data else "key"
-            last_key = list(data[0].keys())[-1] if data else "value"
-            charts.append(ChartSpec(chart_type="table", title="Data Overview", data=data, x_field=first_key, y_field=last_key))
+        if numeric_results and spec.dimensions:
+            # Use actual column names from results (not spec names) to handle case differences
+            # and count-mode results where the metric column is "count" not from spec.measures
+            first_row = numeric_results[0]
+            result_keys = list(first_row.keys())
 
+            # Identify dimension column: first key that's non-numeric in the result
+            dim_col = next(
+                (k for k in result_keys if not isinstance(first_row.get(k), (int, float))),
+                result_keys[0],
+            )
+            # Identify metric column: first numeric key
+            metric_col = next(
+                (k for k in result_keys if k != dim_col),
+                result_keys[-1],
+            )
+
+            chart_data = [
+                {"x": str(r.get(dim_col, "")), "y": round(float(r.get(metric_col) or 0), 2)}
+                for r in numeric_results[:20]
+                if r.get(dim_col) not in (None, "")
+            ]
+            if chart_data:
+                metric_label = metric_col.capitalize()
+                dim_label = dim_col
+                charts.append(ChartSpec(
+                    chart_type="bar",
+                    title=f"{metric_label} by {dim_label}",
+                    data=chart_data,
+                    x_field="x",
+                    y_field="y",
+                ))
+        if not charts and numeric_results:
+            # Show numeric rows as a plain table
+            data = numeric_results[:20]
+            keys = list(data[0].keys())
+            charts.append(ChartSpec(
+                chart_type="table",
+                title="Query Results",
+                data=data,
+                x_field=keys[0],
+                y_field=keys[-1],
+            ))
+        if not charts:
+            # No numeric data at all — show a "no results" card, not similarity scores
+            charts.append(ChartSpec(
+                chart_type="table",
+                title="No Results",
+                data=[{"message": "No data matched your query. Try a different question or check that your data has been processed."}],
+                x_field="message",
+                y_field="message",
+            ))
+
+        narrative = (
+            f"Analysis of '{spec.restatement}' returned {len(numeric_results)} groups."
+            if numeric_results
+            else "No numeric results were found for this query. The question may reference columns not available in the structured data store."
+        )
         return DashboardSpec(
             kpi_cards=kpi_cards,
             charts=charts,
-            narrative=f"Analysis of '{spec.restatement}' returned {len(numeric_results)} records.",
+            narrative=narrative,
             recommended_action="Refine your question or explore the charts for deeper insights.",
         )
