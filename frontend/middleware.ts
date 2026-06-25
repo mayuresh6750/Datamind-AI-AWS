@@ -2,6 +2,18 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+// Routes that authenticated users should NOT be able to visit (redirect to home).
+const AUTH_ROUTES = ['/login', '/signup'];
+
+// Routes that require authentication (redirect to login if no session).
+const PROTECTED_PREFIXES = ['/', '/validate', '/clean', '/intent', '/dashboard', '/domain'];
+
+function isProtected(pathname: string): boolean {
+  return PROTECTED_PREFIXES.some((p) =>
+    p === '/' ? pathname === '/' : pathname.startsWith(p)
+  );
+}
+
 export async function middleware(request: NextRequest) {
   // Allow Playwright E2E tests to bypass the Supabase auth guard.
   if (request.headers.get('x-e2e-test') === 'true') {
@@ -12,7 +24,7 @@ export async function middleware(request: NextRequest) {
     request: { headers: request.headers },
   });
 
-  // Keep the Supabase client alive so it can refresh session cookies.
+  // Build Supabase server client so session cookies are refreshed on every request.
   let session: { user?: { user_metadata?: { role?: string } } } | null = null;
   try {
     const supabase = createServerClient(
@@ -36,36 +48,47 @@ export async function middleware(request: NextRequest) {
         },
       }
     );
-    // Refresh session if expired — required for Server Components.
     const { data } = await supabase.auth.getSession();
     session = data.session;
   } catch {
-    // If Supabase is unreachable or the key format is unsupported, just pass through.
+    // Supabase unreachable — fall through and let client-side auth handle it.
   }
 
-  // ── Server-side admin route guard ────────────────────────────────────────
-  // Protect all /admin/* routes at the edge before any React component renders.
-  // The client-side layout guard is a second layer of defence, not the first.
-  if (request.nextUrl.pathname.startsWith('/admin')) {
+  const { pathname } = request.nextUrl;
+
+  // ── Admin route guard ─────────────────────────────────────────────────────
+  if (pathname.startsWith('/admin')) {
     if (!session) {
-      // Not authenticated — send to login
-      const loginUrl = request.nextUrl.clone();
-      loginUrl.pathname = '/login';
-      return NextResponse.redirect(loginUrl);
+      const url = request.nextUrl.clone();
+      url.pathname = '/login';
+      return NextResponse.redirect(url);
     }
     const role = session.user?.user_metadata?.role;
     if (role !== 'admin') {
-      // Authenticated but not admin — send to home
-      const homeUrl = request.nextUrl.clone();
-      homeUrl.pathname = '/';
-      return NextResponse.redirect(homeUrl);
+      const url = request.nextUrl.clone();
+      url.pathname = '/';
+      return NextResponse.redirect(url);
     }
+    return response;
+  }
+
+  // ── User route guard — redirect unauthenticated users to /login ───────────
+  if (isProtected(pathname) && !session) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/login';
+    return NextResponse.redirect(url);
+  }
+
+  // ── Auth page guard — redirect already-logged-in users away from /login ───
+  if (AUTH_ROUTES.includes(pathname) && session) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/';
+    return NextResponse.redirect(url);
   }
 
   return response;
 }
 
 export const config = {
-  // Include /admin/* in the middleware matcher so the guard runs server-side.
-  matcher: ['/', '/admin/:path*', '/validate/:path*', '/clean/:path*', '/domain'],
+  matcher: ['/', '/login', '/signup', '/admin/:path*', '/validate/:path*', '/clean/:path*', '/intent/:path*', '/dashboard/:path*', '/domain'],
 };
