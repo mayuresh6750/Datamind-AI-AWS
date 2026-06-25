@@ -83,32 +83,46 @@ export default function CleaningPage() {
     }
   }
 
-  if (!plan) return <div className='p-8'>Loading cleaning plan…</div>
+  if (!plan) {
+    return (
+      <div className='flex items-center justify-center py-20 gap-2 text-slate-400'>
+        <svg className='w-5 h-5 animate-spin' viewBox='0 0 24 24' fill='none'>
+          <circle className='opacity-25' cx='12' cy='12' r='10' stroke='currentColor' strokeWidth='4' />
+          <path className='opacity-75' fill='currentColor' d='M4 12a8 8 0 018-8v8z' />
+        </svg>
+        <span className='text-sm'>Generating cleaning plan…</span>
+      </div>
+    )
+  }
 
   const approvedCount = approvedIds.size
   const totalCount = plan.steps.length
 
   return (
-    <div>
-      <h1 className='text-xl font-semibold mb-1'>Cleaning plan review</h1>
-      <p className='text-sm text-slate-500 mb-1'>
-        Review proposed cleaning steps and approve or reject each one.
-      </p>
-      <p className='text-xs text-slate-400 mb-4'>
-        Dataset: {plan.total_rows_before.toLocaleString()} rows before →{' '}
-        {plan.total_rows_after.toLocaleString()} rows after cleaning
-      </p>
+    <div className='space-y-4'>
+      <div>
+        <h1 className='page-title'>Cleaning plan review</h1>
+        <p className='page-subtitle'>
+          Review each proposed cleaning action and approve or reject it before execution.
+        </p>
+      </div>
+
+      <div className='flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-500 shadow-sm'>
+        <span className='font-medium text-slate-700'>{plan.total_rows_before.toLocaleString()} rows</span>
+        <span>→ after cleaning →</span>
+        <span className='font-medium text-green-700'>{plan.total_rows_after.toLocaleString()} rows</span>
+      </div>
 
       <HitlBanner checkpoint='#2' detail={`${approvedCount} of ${totalCount} steps approved`} />
 
-      <div className='space-y-3 mt-4'>
+      <div className='space-y-2.5 mt-2'>
         {plan.steps.map((step, i) => {
           const { badge, rowBorder } = confidenceStyle(step.confidence)
           const isApproved = approvedIds.has(step.step_id)
           return (
             <div
               key={step.step_id}
-              className={`border rounded-lg p-4 flex items-start gap-4 ${rowBorder} ${!isApproved ? 'opacity-50' : ''}`}
+              className={`rounded-lg border bg-white p-4 flex items-start gap-4 shadow-sm transition-opacity ${rowBorder || 'border-slate-200'} ${!isApproved ? 'opacity-45' : ''}`}
             >
               {/* step number */}
               <div className='w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-xs font-semibold text-slate-600 shrink-0'>
@@ -156,13 +170,13 @@ export default function CleaningPage() {
       </div>
 
       {error && (
-        <p className='mt-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2'>{error}</p>
+        <div className='rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700'>{error}</div>
       )}
 
-      <div className='flex gap-2 mt-4'>
-        <button onClick={() => router.back()} className='btn-outline'>Back</button>
+      <div className='flex items-center justify-between border-t border-slate-100 pt-4'>
+        <button onClick={() => router.back()} className='btn-outline'>← Back</button>
         <button onClick={handleSubmit} disabled={saving || approvedCount === 0} className='btn-primary'>
-          {saving ? 'Submitting…' : `Submit ${approvedCount} approved step${approvedCount !== 1 ? 's' : ''}`}
+          {saving ? 'Submitting…' : `Apply ${approvedCount} approved step${approvedCount !== 1 ? 's' : ''} →`}
         </button>
       </div>
     </div>

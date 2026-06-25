@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import { SchemaTable } from '@/components/user/SchemaTable'
 import { MergeProposal } from '@/components/user/MergeProposal'
 import { HitlBanner } from '@/components/shared/HitlBanner'
+import { CheckCircle2, Loader2, RotateCcw } from 'lucide-react'
 import type { MergePlan } from '@/types/pipeline'
 
 export default function ValidatePage() {
@@ -26,11 +27,6 @@ export default function ValidatePage() {
     })
   }, [id])
 
-  const handleStrategyChange = (next: string) => {
-    setStrategy(next)
-    if (next !== 'join') setJoinKey(null)
-  }
-
   const submitDecision = async (approved: boolean) => {
     if (!plan) return
     setSaving(true)
@@ -50,13 +46,29 @@ export default function ValidatePage() {
     }
   }
 
-  if (!plan) return <div className='p-8'>Loading schema…</div>
+  if (!plan) {
+    return (
+      <div className="flex items-center justify-center py-20 gap-2 text-slate-400">
+        <Loader2 className="w-5 h-5 animate-spin" />
+        <span className="text-sm">Loading schema…</span>
+      </div>
+    )
+  }
+
   return (
-    <div>
-      <h1 className='text-xl font-semibold mb-1'>Schema & merge validation</h1>
-      <p className='text-sm text-slate-500 mb-4'>Review inferred schema, column classification, and the proposed merge plan.</p>
-      <HitlBanner checkpoint='#1' detail={`${plan.column_profiles.length} columns`} />
-      <div className='mb-4'>
+    <div className="space-y-4">
+      {/* Page heading */}
+      <div>
+        <h1 className="page-title">Schema &amp; merge validation</h1>
+        <p className="page-subtitle">
+          Review inferred schema, column classification, and the proposed merge plan.
+        </p>
+      </div>
+
+      <HitlBanner checkpoint='#1' detail={`${plan.column_profiles.length} columns detected`} />
+
+      {/* Schema table card */}
+      <div className="page-card">
         <SchemaTable
           columns={plan.column_profiles}
           excludedColumns={excludedColumns}
@@ -70,30 +82,52 @@ export default function ValidatePage() {
           }
         />
       </div>
-      <MergeProposal
-        plan={plan}
-        strategy={strategy ?? plan.strategy}
-        joinKey={joinKey}
-        onStrategyChange={handleStrategyChange}
-        onJoinKeyChange={setJoinKey}
-      />
+
+      {/* Merge proposal card */}
+      <div className="page-card">
+        <MergeProposal
+          plan={plan}
+          strategy={strategy ?? plan.strategy}
+          joinKey={joinKey}
+          onStrategyChange={(next) => {
+            setStrategy(next)
+            if (next !== 'join') setJoinKey(null)
+          }}
+          onJoinKeyChange={setJoinKey}
+        />
+      </div>
+
+      {/* Error */}
       {error && (
-        <p className='mt-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2'>{error}</p>
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
       )}
-      <div className='flex gap-2 mt-4'>
+
+      {/* ── Action row ───────────────────────────────────────────────────────
+           REJECT (danger, outlined red) sits left — clearly destructive.
+           CONFIRM (primary, solid blue) sits right — clearly the next step.
+           Size, icon, and colour make the distinction unmistakable.
+      ─────────────────────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between pt-2 border-t border-slate-100">
         <button
           onClick={() => submitDecision(false)}
           disabled={saving}
-          className='btn-outline text-red-600 border-red-200 hover:bg-red-50'
+          className="btn-danger"
         >
-          Reject & start over
+          <RotateCcw className="w-4 h-4" />
+          Reject &amp; start over
         </button>
+
         <button
           onClick={() => submitDecision(true)}
           disabled={saving}
-          className='btn-primary'
+          className="btn-primary"
         >
-          {saving ? 'Submitting…' : 'Confirm & proceed to cleaning'}
+          {saving
+            ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting…</>
+            : <><CheckCircle2 className="w-4 h-4" /> Confirm &amp; proceed to cleaning</>
+          }
         </button>
       </div>
     </div>

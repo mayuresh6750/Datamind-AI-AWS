@@ -4,43 +4,91 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 214 32% 97%;       /* slate-50 page wash */
+    --foreground: 222 47% 11%;       /* slate-900 */
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 221 83% 53%;          /* blue-600 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 25% 95%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 215 25% 95%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 215 25% 92%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;        /* red-500 */
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 88%;
+    --input: 214 32% 91%;
+    --ring: 221 83% 53%;
     --radius: 0.5rem;
-  }
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+    --surface: 0 0% 100%;
   }
 }
 
 @layer base {
   * { @apply border-border; }
-  body { @apply bg-background text-foreground; }
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* ── Shared button primitives ───────────────────────────────────────────── */
+@layer components {
+  /* ✅ PRIMARY — solid blue, used for the main positive action */
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-lg
+           bg-blue-600 text-white text-sm font-semibold shadow-sm
+           hover:bg-blue-700 active:bg-blue-800
+           focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600
+           disabled:opacity-50 disabled:cursor-not-allowed
+           transition-colors duration-150;
+  }
+
+  /* ❌ DANGER — outlined red, used for destructive / reject actions */
+  .btn-danger {
+    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-lg
+           bg-white text-red-600 text-sm font-semibold
+           border border-red-200
+           hover:bg-red-50 hover:border-red-300 active:bg-red-100
+           focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500
+           disabled:opacity-50 disabled:cursor-not-allowed
+           shadow-sm transition-colors duration-150;
+  }
+
+  /* ← OUTLINE — neutral secondary action (Back, Cancel) */
+  .btn-outline {
+    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-lg
+           bg-white text-slate-700 text-sm font-semibold
+           border border-slate-200
+           hover:bg-slate-50 hover:border-slate-300 active:bg-slate-100
+           focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400
+           disabled:opacity-50 disabled:cursor-not-allowed
+           shadow-sm transition-colors duration-150;
+  }
+
+  /* ghost — subtle text-only (nav links, inline actions) */
+  .btn-ghost {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md
+           text-slate-600 text-sm font-medium
+           hover:bg-slate-100 active:bg-slate-200
+           disabled:opacity-50 disabled:cursor-not-allowed
+           transition-colors duration-150;
+  }
+
+  /* ── Page card wrapper ─────────────────────────────────────────────────── */
+  .page-card {
+    @apply bg-white rounded-xl border border-slate-200 shadow-sm p-6;
+  }
+
+  /* ── Section heading ───────────────────────────────────────────────────── */
+  .page-title {
+    @apply text-xl font-semibold text-slate-900 mb-0.5;
+  }
+  .page-subtitle {
+    @apply text-sm text-slate-500 mb-5;
+  }
 }
