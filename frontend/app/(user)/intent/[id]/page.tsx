@@ -5,6 +5,7 @@ import { submitIntent } from '@/lib/pipelineApi'
 import { HitlBanner } from '@/components/shared/HitlBanner'
 import { JobProgressBar } from '@/components/shared/JobPoller'
 import { useAuthStore } from '@/store/authStore'
+import { Lightbulb, Sparkles } from 'lucide-react'
 
 const DOMAIN_CHIPS: Record<string, string[]> = {
   finance: [
@@ -101,9 +102,12 @@ export default function IntentPage() {
   return (
     <div className='max-w-2xl'>
       <h1 className='text-xl font-semibold mb-1'>What do you want to learn from this data?</h1>
-      <p className='text-sm text-slate-500 mb-4'>
-        Ask in plain English — no SQL or formulas needed.
-      </p>
+
+      {/* Instruction callout — indigo so it reads as AI guidance, not invisible hint */}
+      <div className='instruction-tip'>
+        <Lightbulb className='h-4 w-4 shrink-0 text-indigo-500' />
+        <span>Ask in plain English — no SQL or formulas needed. The AI will interpret your question and build the analysis automatically.</span>
+      </div>
 
       <HitlBanner checkpoint='#3' detail='Describe your analysis goal' />
 
@@ -114,17 +118,20 @@ export default function IntentPage() {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSubmit()
           }}
-          placeholder='e.g. What is the average length of stay by diagnosis?'
+          placeholder='e.g. What is the average order value by channel?'
           rows={3}
-          className='w-full border rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none'
+          className='w-full rounded-lg border border-slate-200 bg-white/80 px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 resize-none transition-colors'
         />
-        <p className='text-xs text-slate-400 mt-1'>Tip: Ctrl+Enter to submit</p>
+        <p className='text-xs text-indigo-400 mt-1.5 flex items-center gap-1'>
+          <span>⌨</span> Press <kbd className='px-1 py-0.5 rounded bg-slate-100 text-slate-500 text-xs font-mono'>Ctrl+Enter</kbd> to submit instantly
+        </p>
       </div>
 
       {/* Domain suggestion chips */}
       <div className='mt-4'>
-        <p className='text-xs font-medium text-slate-500 mb-2'>
-          Suggested questions for {domainLabel}:
+        <p className='flex items-center gap-1.5 text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-2.5'>
+          <Sparkles className='h-3.5 w-3.5' />
+          Suggested questions for {domainLabel}
         </p>
         <div className='flex flex-wrap gap-2'>
           {chips.map((chip) => (

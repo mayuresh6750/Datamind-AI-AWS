@@ -117,7 +117,22 @@ async def run_ingest_pipeline(dataset_id: str, user_id: str, job_id: str) -> Non
                 fmt = ingestion.detect_format(filename, content)
                 rows = ingestion.parse_content(fmt, content)
 
-                per_file_counts.append({"filename": filename, "row_count": len(rows)})
+                # Extract upload timestamp from archive path: user/dataset/YYYYMMDDTHHMMSS/file
+                uploaded_at: str | None = None
+                parts = path.split("/")
+                if len(parts) >= 3:
+                    try:
+                        from datetime import datetime as _dt
+                        uploaded_at = _dt.strptime(parts[2], "%Y%m%dT%H%M%S").strftime("%Y-%m-%dT%H:%M:%SZ")
+                    except ValueError:
+                        pass
+
+                per_file_counts.append({
+                    "filename": filename,
+                    "row_count": len(rows),
+                    "uploaded_at": uploaded_at,
+                    "archive_path": path,
+                })
                 profiles = ingestion.profile_columns(rows)
                 file_profiles.append((filename, profiles))
                 file_formats.append(fmt)
@@ -164,14 +179,16 @@ async def run_ingest_pipeline(dataset_id: str, user_id: str, job_id: str) -> Non
             # merged_row_count here is the raw sum; it is updated to the actual post-merge
             # count once the cleaning executor runs and applies the confirmed strategy.
             try:
+                from datetime import datetime as _dt
                 summary = {
                     "dataset_id": dataset_id,
-                    "source_files": per_file_counts,
+                    "generated_at": _dt.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "source_files": per_file_counts,   # each entry has filename, row_count, uploaded_at, archive_path
                     "proposed_merge_strategy": enriched_plan.strategy,
                     "source_combined_row_count": len(all_rows),
                     "status": "awaiting_hitl_merge",
                 }
-                storage.upload_summary(user_id, dataset_id, json.dumps(summary).encode())
+                storage.upload_summary(user_id, dataset_id, json.dumps(summary, indent=2).encode())
             except Exception as summary_exc:
                 log.warning("summary_upload_skipped", error=str(summary_exc))
 
@@ -485,8 +502,10 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
                     or merge_proposal.get("strategy")
                     or "union"
                 )
+                from datetime import datetime as _dt
                 summary = {
                     "dataset_id": dataset_id,
+                    "generated_at": _dt.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "source_files": dataset.source_file_counts or [],
                     "merge_strategy": strategy,
                     "merged_row_count": merged,
@@ -494,7 +513,7 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
                     "dropped_rows": merged - clean,
                     "status": "ready",
                 }
-                storage.upload_summary(str(dataset.user_id), dataset_id, json.dumps(summary).encode())
+                storage.upload_summary(str(dataset.user_id), dataset_id, json.dumps(summary, indent=2).encode())
             except Exception as summary_exc:
                 log.warning("summary_update_skipped", error=str(summary_exc))
 
