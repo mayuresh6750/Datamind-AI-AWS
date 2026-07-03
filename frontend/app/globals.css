@@ -4,13 +4,13 @@
 
 @layer base {
   :root {
-    --background: 214 32% 97%;       /* slate-50 page wash */
-    --foreground: 222 47% 11%;       /* slate-900 */
+    --background: 214 32% 97%;
+    --foreground: 222 47% 11%;
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
-    --primary: 221 83% 53%;          /* blue-600 */
+    --primary: 221 83% 53%;
     --primary-foreground: 0 0% 100%;
     --secondary: 215 25% 95%;
     --secondary-foreground: 222 47% 11%;
@@ -18,7 +18,7 @@
     --muted-foreground: 215 16% 47%;
     --accent: 215 25% 92%;
     --accent-foreground: 222 47% 11%;
-    --destructive: 0 84% 60%;        /* red-500 */
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
     --border: 214 32% 88%;
     --input: 214 32% 91%;
@@ -30,15 +30,35 @@
 
 @layer base {
   * { @apply border-border; }
+
+  html { height: 100%; }
+
   body {
-    @apply bg-slate-50 text-slate-900 antialiased;
+    @apply text-slate-900 antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
+    min-height: 100%;
+
+    /* ── Enterprise background ──────────────────────────────────────────────
+       Layer 1: indigo radial glow from just above the viewport top-centre —
+                gives the subtle "hero light" effect seen on Linear / Vercel.
+       Layer 2: fine dot grid — adds depth without being distracting.
+       Base:    cool blue-gray (#eaf0fb) — much richer than flat white.
+    ────────────────────────────────────────────────────────────────────── */
+    background-color: #eaf0fb;
+    background-image:
+      radial-gradient(ellipse 75% 45% at 50% -8%,
+        rgba(99, 102, 241, 0.13) 0%,
+        transparent 100%),
+      radial-gradient(circle,
+        rgba(148, 163, 184, 0.45) 1px,
+        transparent 1px);
+    background-size: 100% 100%, 26px 26px;
+    background-attachment: fixed;
   }
 }
 
-/* ── Shared button primitives ───────────────────────────────────────────── */
+/* ── Button primitives ──────────────────────────────────────────────────── */
 @layer components {
-  /* ✅ PRIMARY — solid blue, used for the main positive action */
   .btn-primary {
     @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-lg
            bg-blue-600 text-white text-sm font-semibold shadow-sm
@@ -48,7 +68,6 @@
            transition-colors duration-150;
   }
 
-  /* ❌ DANGER — outlined red, used for destructive / reject actions */
   .btn-danger {
     @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-lg
            bg-white text-red-600 text-sm font-semibold
@@ -59,7 +78,6 @@
            shadow-sm transition-colors duration-150;
   }
 
-  /* ← OUTLINE — neutral secondary action (Back, Cancel) */
   .btn-outline {
     @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-lg
            bg-white text-slate-700 text-sm font-semibold
@@ -70,21 +88,36 @@
            shadow-sm transition-colors duration-150;
   }
 
-  /* ghost — subtle text-only (nav links, inline actions) */
   .btn-ghost {
     @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md
            text-slate-600 text-sm font-medium
-           hover:bg-slate-100 active:bg-slate-200
+           hover:bg-white/70 active:bg-white/90
            disabled:opacity-50 disabled:cursor-not-allowed
            transition-colors duration-150;
   }
 
-  /* ── Page card wrapper ─────────────────────────────────────────────────── */
+  /* ── Card — white glass on the gradient background ─────────────────────── */
   .page-card {
-    @apply bg-white rounded-xl border border-slate-200 shadow-sm p-6;
+    @apply bg-white/90 rounded-xl p-6;
+    border: 1px solid rgba(203, 213, 225, 0.7);
+    box-shadow:
+      0 1px 2px rgba(15, 23, 42, 0.04),
+      0 4px 16px rgba(15, 23, 42, 0.05),
+      0 0 0 1px rgba(99, 102, 241, 0.04);
+    backdrop-filter: blur(2px);
   }
 
-  /* ── Section heading ───────────────────────────────────────────────────── */
+  /* ── Auth card (login / signup) ─────────────────────────────────────────── */
+  .auth-card {
+    @apply w-full max-w-sm bg-white rounded-2xl p-8 space-y-5;
+    border: 1px solid rgba(203, 213, 225, 0.8);
+    box-shadow:
+      0 2px 4px rgba(15, 23, 42, 0.04),
+      0 8px 32px rgba(15, 23, 42, 0.08),
+      0 0 0 1px rgba(99, 102, 241, 0.05);
+  }
+
+  /* ── Page headings ──────────────────────────────────────────────────────── */
   .page-title {
     @apply text-xl font-semibold text-slate-900 mb-0.5;
   }

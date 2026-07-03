@@ -21,7 +21,7 @@ export default function UserLayout({ children }: { children: React.ReactNode }) 
   }, [token, hydrated, router]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-50">
+    <div className="flex min-h-screen flex-col">
       <Navbar />
       {hydrated && !activeDomain && pathname !== '/domain' && <DomainModal />}
       <main className="flex-1 px-4 py-6 sm:px-8 sm:py-8 max-w-5xl mx-auto w-full">

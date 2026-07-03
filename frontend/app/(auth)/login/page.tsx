@@ -1,12 +1,14 @@
 "use client"
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import { supabase } from '@/lib/supabase'
+import { BarChart2, Loader2 } from 'lucide-react'
 
 function extractLoginError(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message;
-  return 'Login failed. Please try again.';
+  if (err instanceof Error && err.message) return err.message
+  return 'Login failed. Please try again.'
 }
 
 export default function LoginPage() {
@@ -18,7 +20,7 @@ export default function LoginPage() {
   const [loading, setLoading]   = useState(false)
 
   const handleSignIn = async () => {
-    if (!email || !password) { setErr('Please enter email and password'); return }
+    if (!email || !password) { setErr('Please enter your email and password.'); return }
     setLoading(true)
     setErr('')
     try {
@@ -29,22 +31,13 @@ export default function LoginPage() {
       })
 
       let body: any = {}
-      try {
-        body = await res.json()
-      } catch {
-        if (!res.ok) {
-          setErr(`Server error (${res.status}). Please check if backend is running.`)
-          return
-        }
-        setErr('Invalid response from server.')
+      try { body = await res.json() } catch {
+        setErr(res.ok ? 'Invalid response from server.' : `Server error (${res.status}). Is the backend running?`)
         return
       }
 
-      if (!res.ok) {
-        setErr(body.detail ?? 'Invalid credentials')
-        return
-      }
-      // Sync session into Supabase client so middleware cookies are written
+      if (!res.ok) { setErr(body.detail ?? 'Invalid credentials'); return }
+
       await supabase.auth.setSession({
         access_token:  body.access_token,
         refresh_token: body.refresh_token,
@@ -58,7 +51,6 @@ export default function LoginPage() {
         email,
         activeDomain: null,
       })
-      // Use Next.js router for client-side navigation (no full page reload)
       router.push(body.role === 'admin' ? '/admin' : '/domain')
     } catch (e: unknown) {
       setErr(extractLoginError(e))
@@ -68,43 +60,70 @@ export default function LoginPage() {
   }
 
   return (
-    <div className='min-h-screen flex items-center justify-center bg-slate-50'>
-      <div className='w-full max-w-sm p-8 bg-white rounded-xl border border-slate-200 space-y-4'>
-        <h1 className='text-xl font-semibold'>Sign in to DataMind</h1>
-        <p className='text-sm text-slate-500'>Enter your email and password to continue.</p>
-        <div className='space-y-1'>
-          <label className='text-sm font-medium'>Email</label>
-          <input
-            type='email'
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            className='w-full border rounded-md px-3 py-2 text-sm'
-            placeholder='you@example.com'
-          />
+    <div className="flex min-h-screen flex-col items-center justify-center px-4 py-12">
+      {/* Brand mark */}
+      <div className="mb-8 flex flex-col items-center gap-2">
+        <div className="flex items-center justify-center h-11 w-11 rounded-xl bg-blue-600 shadow-lg shadow-blue-600/30">
+          <BarChart2 className="h-6 w-6 text-white" />
         </div>
-        <div className='space-y-1'>
-          <label className='text-sm font-medium'>Password</label>
-          <input
-            type='password'
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSignIn()}
-            className='w-full border rounded-md px-3 py-2 text-sm'
-            placeholder='••••••••'
-          />
+        <span className="text-lg font-bold text-slate-900 tracking-tight">DataMind AI</span>
+        <p className="text-sm text-slate-500">Sign in to your workspace</p>
+      </div>
+
+      {/* Card */}
+      <div className="auth-card">
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-slate-700" htmlFor="email">
+              Email address
+            </label>
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSignIn()}
+              placeholder="you@company.com"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 transition-colors"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-slate-700" htmlFor="password">
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSignIn()}
+              placeholder="••••••••"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 transition-colors"
+            />
+          </div>
+
+          {err && (
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
+              {err}
+            </div>
+          )}
+
+          <button
+            onClick={handleSignIn}
+            disabled={loading}
+            className="btn-primary w-full justify-center py-2.5"
+          >
+            {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Signing in…</> : 'Sign in'}
+          </button>
         </div>
-        {err && (
-          <p role='alert' aria-live='assertive' className='text-sm text-red-600'>
-            {err}
-          </p>
-        )}
-        <button
-          onClick={handleSignIn}
-          disabled={loading}
-          className='w-full rounded-md bg-blue-600 py-2.5 text-sm font-medium text-white disabled:opacity-50'
-        >
-          {loading ? 'Signing in…' : 'Sign in'}
-        </button>
+
+        <div className="mt-1 text-center text-sm text-slate-500">
+          Don&apos;t have an account?{' '}
+          <Link href="/signup" className="font-medium text-blue-600 hover:text-blue-700 hover:underline">
+            Create one
+          </Link>
+        </div>
       </div>
     </div>
   )
