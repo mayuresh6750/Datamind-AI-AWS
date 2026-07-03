@@ -393,16 +393,17 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
                     if numeric_cols and cleaned_rows:
                         col_defs = ", ".join(f'"{c}" TEXT' for c in numeric_cols)
                         await db.execute(text(f'CREATE TABLE IF NOT EXISTS "{table_name}" ({col_defs})'))
-                        # Bulk insert all rows in a single executemany call instead of
-                        # one INSERT per row, reducing N database round-trips to 1.
+                        # SQLAlchemy bind parameters must not contain spaces or special chars.
+                        # Map each column to a safe param name (spaces/hyphens → underscore).
+                        import re as _re
+                        safe_param = {c: _re.sub(r'[^a-zA-Z0-9_]', '_', c) for c in numeric_cols}
                         col_names = ", ".join(f'"{c}"' for c in numeric_cols)
-                        placeholders = ", ".join(f":{c}" for c in numeric_cols)
+                        placeholders = ", ".join(f":{safe_param[c]}" for c in numeric_cols)
                         insert_sql = text(f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})')
-                        # Chunk to stay under asyncpg's 32 767-parameter limit and
-                        # avoid building a single huge in-memory list for large datasets.
+                        # Chunk to stay under asyncpg's 32 767-parameter limit.
                         for i in range(0, len(cleaned_rows), _INSERT_CHUNK):
                             chunk_vals = [
-                                {c: str(row.get(c, "")) for c in numeric_cols}
+                                {safe_param[c]: str(row.get(c, "")) for c in numeric_cols}
                                 for row in cleaned_rows[i:i + _INSERT_CHUNK]
                             ]
                             await db.execute(insert_sql, chunk_vals)
