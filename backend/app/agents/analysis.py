@@ -17,10 +17,11 @@ You are a SQL generator for a {domain} dataset stored in PostgreSQL.
 Table name: "{table_name}"
 Columns available in this table: {columns}
 
-IMPORTANT — all columns are stored as TEXT.
-- For numeric aggregations: AVG(NULLIF(col_name, '')::FLOAT)  (handles empty strings stored as missing values)
+IMPORTANT — all columns are stored as TEXT. Values may contain currency symbols ($, £, €), commas, or percent signs.
+- For numeric aggregations use: AVG(NULLIF(REGEXP_REPLACE(col_name, '[^0-9.]', '', 'g'), '')::FLOAT)
+  This strips all non-numeric characters (currency symbols, commas, spaces) before casting.
 - For count queries (when measures is empty): COUNT(*) grouped by the dimension columns
-- Use the EXACT column names listed above (they are case-sensitive)
+- Use the EXACT column names listed above (they are case-sensitive in PostgreSQL)
 
 Analysis spec:
 - dimensions: {dimensions}
@@ -29,7 +30,7 @@ Analysis spec:
 - time_range: {time_range}
 
 Generate a single read-only SELECT statement that:
-1. If measures is non-empty: SELECT each dimension + AVG(NULLIF(measure_col, '')::FLOAT) AS col_name, GROUP BY dimensions
+1. If measures is non-empty: SELECT each dimension + AVG(NULLIF(REGEXP_REPLACE(measure_col, '[^0-9.]', '', 'g'), '')::FLOAT) AS col_name, GROUP BY dimensions
 2. If measures is empty but dimensions exist: SELECT dimension_col, COUNT(*) AS count, GROUP BY dimension_col ORDER BY count DESC
 3. Use ONLY the exact column names from the list above
 4. Returns at most 1000 rows
@@ -70,6 +71,8 @@ class AnalysisAgent:
         except Exception as exc:
             log.warning("analysis_table_column_discovery_failed", error=str(exc), table=table_name)
 
+        log.info("analysis_table_columns_found", table=table_name, columns=sorted(available_cols))
+
         if not available_cols:
             log.warning("analysis_table_not_found_or_empty", table=table_name)
             return []
@@ -82,6 +85,7 @@ class AnalysisAgent:
 
         dims = [r for d in spec.dimensions if (r := _resolve(d))]
         measures = [r for m in spec.measures if (r := _resolve(m))]
+        log.info("analysis_resolved_spec", spec_dims=spec.dimensions, spec_measures=spec.measures, resolved_dims=dims, resolved_measures=measures)
 
         # Detect count-type queries: user asked for counts but no numeric measure was found
         is_count_query = dims and not measures
@@ -136,6 +140,8 @@ class AnalysisAgent:
             log.warning("analysis_sql_gen_llm_failed", error=str(exc))
             sql = self._heuristic_sql(dims, measures, table_name)
 
+        log.info("analysis_sql_generated", sql=sql, dims=dims, measures=measures)
+
         # Safety: only allow SELECT statements
         if not sql.strip().upper().startswith("SELECT"):
             log.error("analysis_non_select_sql_blocked", sql=sql[:100])
@@ -182,8 +188,11 @@ class AnalysisAgent:
                 f'{group_by_clause} ORDER BY count DESC LIMIT 100'
             )
 
-        # NULLIF converts empty string → NULL before casting, preventing CAST errors
-        agg_selects = [f'AVG(NULLIF("{m}", \'\')::FLOAT) AS "{m}"' for m in measures]
+        # Strip currency symbols/commas before casting — handles $1,234.56 style values
+        agg_selects = [
+            f'AVG(NULLIF(REGEXP_REPLACE("{m}", \'[^0-9.]\', \'\', \'g\'), \'\')::FLOAT) AS "{m}"'
+            for m in measures
+        ]
         selects = dim_selects + agg_selects or ["COUNT(*) AS total_records"]
         order_by = f' ORDER BY {chr(34)}{dims[0]}{chr(34)}' if dims else ""
         return (
