@@ -23,7 +23,12 @@ export const useAuthStore = create<AuthState>()(
       role: null,
       email: null,
       activeDomain: null,
-      setAuth: (d) => set(d),
+      // Preserve activeDomain if caller doesn't supply one — prevents a token
+      // refresh from wiping the user's selected domain mid-pipeline.
+      setAuth: (d) => set((state) => ({
+        ...d,
+        activeDomain: 'activeDomain' in d ? d.activeDomain : state.activeDomain,
+      })),
       clearAuth: () =>
         set({
           token: null,

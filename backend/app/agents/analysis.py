@@ -1,5 +1,6 @@
 """Analysis Agent — SQL on PostgreSQL for numeric, semantic search on pgvector for textual."""
 import json
+import re
 
 import structlog
 from sqlalchemy import text
@@ -86,6 +87,33 @@ class AnalysisAgent:
         dims = [r for d in spec.dimensions if (r := _resolve(d))]
         measures = [r for m in spec.measures if (r := _resolve(m))]
         log.info("analysis_resolved_spec", spec_dims=spec.dimensions, spec_measures=spec.measures, resolved_dims=dims, resolved_measures=measures)
+
+        # Sample each "measure" column to check whether it actually contains numeric values.
+        # If a measure column is categorical (e.g. "Medication", "Treatment"), demote it to
+        # an additional dimension so we fall through to COUNT(*) grouping instead of AVG().
+        if measures:
+            numeric_measures: list[str] = []
+            text_as_dims: list[str] = []
+            for m in measures:
+                try:
+                    async with await db.begin_nested():
+                        samp = await db.execute(
+                            text(
+                                f'SELECT "{m}" FROM "{table_name}" '
+                                f"WHERE \"{m}\" IS NOT NULL AND \"{m}\" != '' LIMIT 5"
+                            ),
+                        )
+                        vals = [row[0] for row in samp.fetchall()]
+                    # A column is numeric if at least one sample value yields a non-empty
+                    # string after stripping all non-digit/decimal characters.
+                    is_numeric = any(re.sub(r"[^0-9.]", "", str(v)) for v in vals)
+                    (numeric_measures if is_numeric else text_as_dims).append(m)
+                except Exception:
+                    text_as_dims.append(m)  # safe fallback: treat as dim
+            if text_as_dims:
+                dims = dims + text_as_dims
+                measures = numeric_measures
+                log.info("analysis_text_measures_demoted_to_dims", text_as_dims=text_as_dims)
 
         # Detect count-type queries: user asked for counts but no numeric measure was found
         is_count_query = dims and not measures

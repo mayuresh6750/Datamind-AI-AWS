@@ -49,9 +49,11 @@ export default function LoginPage() {
         userId:       body.user_id       ?? null,
         role:         body.role          ?? 'user',
         email,
-        activeDomain: null,
+        activeDomain: body.active_domain ?? null,
       })
-      router.push(body.role === 'admin' ? '/admin' : '/domain')
+      // If backend returned an existing domain, go straight to upload; otherwise prompt for domain
+      const hasDomain = !!body.active_domain
+      router.push(body.role === 'admin' ? '/admin' : hasDomain ? '/' : '/domain')
     } catch (e: unknown) {
       setErr(extractLoginError(e))
     } finally {

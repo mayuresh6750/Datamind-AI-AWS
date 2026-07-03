@@ -1,12 +1,26 @@
 """Auth endpoints — signup, login, refresh, logout via Supabase Auth."""
+import uuid
 import structlog
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_supabase
+from app.core.database import get_supabase, get_db
 from app.models.schemas import AuthResponse, LoginRequest, SignUpRequest
 
 log = structlog.get_logger()
 router = APIRouter()
+
+
+async def _get_active_domain(user_id: str, db: AsyncSession) -> str | None:
+    """Fetch the user's active_domain from the users table — non-fatal."""
+    try:
+        from app.models.db import User
+        result = await db.execute(select(User).where(User.user_id == uuid.UUID(user_id)))
+        user = result.scalar_one_or_none()
+        return user.active_domain if user else None
+    except Exception:
+        return None
 
 
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
@@ -36,7 +50,7 @@ async def signup(body: SignUpRequest):
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(body: LoginRequest):
+async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     supabase = get_supabase()
     try:
         res = supabase.auth.sign_in_with_password({"email": body.email, "password": body.password})
@@ -48,11 +62,15 @@ async def login(body: LoginRequest):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
     role = (res.user.user_metadata or {}).get("role", "user") if res.user else "user"
+    user_id = str(res.user.id)
+    active_domain = await _get_active_domain(user_id, db)
+
     return AuthResponse(
         access_token=res.session.access_token,
         refresh_token=res.session.refresh_token,
-        user_id=str(res.user.id),
+        user_id=user_id,
         role=role,
+        active_domain=active_domain,
     )
 
 

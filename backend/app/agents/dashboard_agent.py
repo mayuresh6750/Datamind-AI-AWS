@@ -111,31 +111,49 @@ class DashboardAgent:
             first_row = numeric_results[0]
             result_keys = list(first_row.keys())
 
-            # Identify dimension column: first key that's non-numeric in the result
+            # Identify dimension column: first key that holds a non-numeric value
             dim_col = next(
                 (k for k in result_keys if not isinstance(first_row.get(k), (int, float))),
                 result_keys[0],
             )
-            # Identify metric column: first numeric key
+            # Identify metric column: first key that holds a numeric value (not dim_col)
             metric_col = next(
-                (k for k in result_keys if k != dim_col),
-                result_keys[-1],
+                (k for k in result_keys if k != dim_col and isinstance(first_row.get(k), (int, float))),
+                next((k for k in result_keys if k != dim_col), result_keys[-1]),
+            )
+            # Optional second dimension for color grouping (e.g. City + Medication + count)
+            color_col = next(
+                (k for k in result_keys if k not in (dim_col, metric_col) and not isinstance(first_row.get(k), (int, float))),
+                None,
             )
 
-            chart_data = [
-                {"x": str(r.get(dim_col, "")), "y": round(float(r.get(metric_col) or 0), 2)}
-                for r in numeric_results[:20]
-                if r.get(dim_col) not in (None, "")
-            ]
+            chart_data = []
+            for r in numeric_results[:20]:
+                if r.get(dim_col) in (None, ""):
+                    continue
+                try:
+                    y_val = round(float(r.get(metric_col) or 0), 2)
+                except (ValueError, TypeError):
+                    y_val = 0.0
+                entry: dict = {"x": str(r.get(dim_col, "")), "y": y_val}
+                if color_col:
+                    entry["color"] = str(r.get(color_col, ""))
+                chart_data.append(entry)
             if chart_data:
                 metric_label = metric_col.capitalize()
                 dim_label = dim_col
+                title = (
+                    f"{metric_label} by {dim_label} & {color_col}"
+                    if color_col
+                    else f"{metric_label} by {dim_label}"
+                )
                 charts.append(ChartSpec(
                     chart_type="bar",
-                    title=f"{metric_label} by {dim_label}",
+                    title=title,
                     data=chart_data,
                     x_field="x",
                     y_field="y",
+                    color_field="color" if color_col else None,
                 ))
         if not charts and numeric_results:
             # Show numeric rows as a plain table

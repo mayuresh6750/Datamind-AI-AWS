@@ -19,6 +19,7 @@ class AuthResponse(BaseModel):
     refresh_token: str
     user_id: str
     role: str
+    active_domain: Optional[str] = None
 
 
 # ─── User / Domain ────────────────────────────────────────────────────────────
