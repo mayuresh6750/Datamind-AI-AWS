@@ -156,12 +156,23 @@ class DashboardAgent:
                     color_field="color" if color_col else None,
                 ))
         if not charts and numeric_results:
-            # Show numeric rows as a plain table
-            data = numeric_results[:20]
+            # Show numeric rows as a plain table (fallback when no chart was built)
+            data = numeric_results[:50]
             keys = list(data[0].keys())
             charts.append(ChartSpec(
                 chart_type="table",
                 title="Query Results",
+                data=data,
+                x_field=keys[0],
+                y_field=keys[-1],
+            ))
+        elif numeric_results:
+            # Always append a data breakdown table alongside the chart
+            data = numeric_results[:50]
+            keys = list(data[0].keys())
+            charts.append(ChartSpec(
+                chart_type="table",
+                title="Data Breakdown",
                 data=data,
                 x_field=keys[0],
                 y_field=keys[-1],

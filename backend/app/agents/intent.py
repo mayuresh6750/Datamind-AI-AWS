@@ -20,7 +20,15 @@ Parse the intent into a structured analysis spec. Return ONLY valid JSON matchin
 
 Rules:
 - dimensions: grouping columns (categorical, date/time, or textual classification columns)
-- measures: numeric columns to aggregate
+- measures: numeric columns to aggregate with AVG/SUM
+  IMPORTANT — "Xwise", "X wise", "by X", "per X" means GROUP BY X. Set measures: [] and
+  use COUNT(*) automatically. Do NOT include unrelated numeric columns as measures.
+  Examples:
+    "citywise lab_test"        → dimensions: ["City","Lab_Test"],  measures: []
+    "lab_test wise test_cost"  → dimensions: ["Lab_Test"],         measures: ["Test_Cost"]
+    "agewise test_cost"        → dimensions: ["Age"],              measures: ["Test_Cost"]
+  Only add a numeric column to measures when the question explicitly asks to aggregate it
+  (e.g. "average cost", "total bill", "sum of amount").
 - suggested_chart_types: 1-3 chart types from [line, bar, table, scatter, pie]
 - restatement: rephrase the question in domain-specific terms to confirm understanding
 - confidence: float 0.0–1.0 reflecting how clearly the question maps to available columns
@@ -81,7 +89,13 @@ class IntentAgent:
         ][:2]
 
         # Detect count-type questions — no numeric measure needed, just GROUP BY dimensions.
-        is_count_q = any(k in q for k in ("count", "how many", "number of", "frequency", "distribution", "wise count", "per ", "breakdown"))
+        # "citywise", "lab_test wise", "city wise" all mean GROUP BY → COUNT(*).
+        import re as _re
+        _has_wise = bool(_re.search(r'\bwise\b', q))
+        is_count_q = _has_wise or any(k in q for k in (
+            "count", "how many", "number of", "frequency", "distribution",
+            "wise count", "per ", "breakdown",
+        ))
 
         if is_count_q:
             measures: list[str] = []
