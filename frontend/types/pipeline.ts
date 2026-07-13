@@ -1,7 +1,7 @@
 // Matches backend/app/models/schemas.py: ColumnProfile, MergePlan (column_routing
 // is the only thing not sent by the backend — it's derived client-side from
 // `classification` so the user can override per-column before submitting).
-export type ColumnClassification = 'numeric' | 'textual' | 'ambiguous'
+export type ColumnClassification = 'numeric' | 'structured' | 'textual' | 'ambiguous'
 export interface ColumnProfile {
 	name: string
 	dtype: string

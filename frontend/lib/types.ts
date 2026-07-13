@@ -13,7 +13,7 @@ export interface ColumnProfile {
   null_count: number;
   distinct_count: number;
   avg_length?: number;
-  classification: "numeric" | "textual" | "ambiguous";
+  classification: "numeric" | "structured" | "textual" | "ambiguous";
 }
 
 export interface MergePlan {

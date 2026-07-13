@@ -12,19 +12,19 @@ T = TypeVar("T", bound=BaseModel)
 
 _PROVIDER_ROUTES: dict[str, str] = {
     "google_gemini": "gemini",
+    "groq": "groq",
 }
 
-# Fallback model: a different Gemini generation tried once after all primary retries fail.
-# Only used for transient errors (503/timeout) — quota errors (429) skip this entirely
-# because both models share the same API key and therefore the same quota pool.
-_FALLBACK_MODEL = "gemini/gemini-2.0-flash"
+# Fallback model: used once after all primary retries fail (transient errors).
+# Using a smaller/faster Groq model as fallback.
+_FALLBACK_MODEL = "groq/llama-3.1-8b-instant"
 
 # Wait times (seconds) between retry attempts for transient errors.
-_RETRY_DELAYS = (1, 2)
+_RETRY_DELAYS = (2, 4)
 
-# Hard per-call timeout (seconds). Prevents a stalled Gemini connection from
-# blocking the event loop indefinitely across all 4 sequential agent calls.
-_CALL_TIMEOUT_SECONDS = 30
+# Hard per-call timeout (seconds). The dashboard agent generates complex structured JSON
+# which takes longer on busy models — 90s gives it enough headroom.
+_CALL_TIMEOUT_SECONDS = 90
 
 
 def _is_quota_error(exc: Exception) -> bool:

@@ -3,9 +3,10 @@ import React from 'react'
 import type { ColumnProfile } from '@/types/pipeline'
 
 const CLASSIFICATION_STYLES: Record<string, string> = {
-  numeric:   'bg-blue-50 text-blue-700 border border-blue-200',
-  textual:   'bg-violet-50 text-violet-700 border border-violet-200',
-  ambiguous: 'bg-orange-50 text-orange-700 border border-orange-200',
+  numeric:    'bg-blue-50 text-blue-700 border border-blue-200',
+  structured: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  textual:    'bg-violet-50 text-violet-700 border border-violet-200',
+  ambiguous:  'bg-orange-50 text-orange-700 border border-orange-200',
 }
 
 export function SchemaTable({
@@ -68,7 +69,7 @@ export function SchemaTable({
                   </td>
                   <td className="px-3 py-2.5">
                     <select
-                      defaultValue={c.classification}
+                      value={c.classification}
                       onChange={(e) => onClassificationChange?.(c.name, e.target.value)}
                       disabled={excluded}
                       className={[
@@ -77,8 +78,9 @@ export function SchemaTable({
                         CLASSIFICATION_STYLES[c.classification] ?? 'bg-slate-100 text-slate-700',
                       ].join(' ')}
                     >
-                      <option value="numeric">numeric</option>
-                      <option value="textual">textual</option>
+                      <option value="numeric">numeric (→ SQL aggregation)</option>
+                      <option value="structured">structured (→ SQL grouping)</option>
+                      <option value="textual">textual (→ vector search)</option>
                       <option value="ambiguous">ambiguous</option>
                     </select>
                   </td>

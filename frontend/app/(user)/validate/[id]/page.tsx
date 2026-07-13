@@ -70,7 +70,10 @@ export default function ValidatePage() {
       {/* Schema table card */}
       <div className="page-card">
         <SchemaTable
-          columns={plan.column_profiles}
+          columns={plan.column_profiles.map((col) => ({
+            ...col,
+            classification: typeOverrides[col.name] || col.classification,
+          }))}
           excludedColumns={excludedColumns}
           onClassificationChange={(col, classification) =>
             setTypeOverrides((prev) => ({ ...prev, [col]: classification }))
