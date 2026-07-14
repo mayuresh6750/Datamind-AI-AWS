@@ -13,30 +13,38 @@ from app.models.schemas import AnalysisSpec
 log = structlog.get_logger()
 
 _SQL_GEN_PROMPT = """
-You are a SQL generator for a {domain} dataset stored in PostgreSQL.
+You are a True NL-to-SQL expert for a {domain} dataset stored in PostgreSQL.
+
+User's exact question:
+"{original_question}"
 
 Table name: "{table_name}"
 Columns available in this table: {columns}
 
-IMPORTANT — all columns are stored as TEXT. Values may contain currency symbols ($, £, €), commas, or percent signs.
-- For numeric aggregations use: AVG(NULLIF(REGEXP_REPLACE(col_name, '[^0-9.]', '', 'g'), '')::FLOAT)
-  This strips all non-numeric characters (currency symbols, commas, spaces) before casting.
-- For count queries (when measures is empty): COUNT(*) grouped by the dimension columns
-- Use the EXACT column names listed above (they are case-sensitive in PostgreSQL)
+Analysis hints (use these as guidance, but the question above is the ultimate source of truth):
+- Grouping dimensions: {dimensions}
+- Measures (numeric columns): {measures}
+- Requested aggregation: {aggregation}
+  → "sum" = SUM(...)
+  → "avg" = AVG(...)
+  → "count" = COUNT(*)
+  → "max" = MAX(...)
+  → "min" = MIN(...)
+- Filters: {filters}
+- Time range: {time_range}
 
-Analysis spec:
-- dimensions: {dimensions}
-- measures: {measures}
-- filters: {filters}
-- time_range: {time_range}
-
-Generate a single read-only SELECT statement that:
-1. If measures is non-empty: SELECT each dimension + AVG(NULLIF(REGEXP_REPLACE(measure_col, '[^0-9.]', '', 'g'), '')::FLOAT) AS col_name, GROUP BY dimensions
-2. If measures is empty but dimensions exist: SELECT dimension_col, COUNT(*) AS count, GROUP BY dimension_col ORDER BY count DESC
-3. Use ONLY the exact column names from the list above
-4. Returns at most 1000 rows
-
-Return ONLY the raw SQL — no explanation, no markdown, no semicolon at the end.
+IMPORTANT RULES — you MUST follow all of these:
+1. ALL column names MUST be wrapped in double quotes: "Column_Name" — never unquoted.
+2. All columns are stored as TEXT. For numeric aggregations use:
+   {aggregation_upper}(NULLIF(REGEXP_REPLACE("col_name", '[^0-9.-]', '', 'g'), '')::FLOAT)
+   This strips currency symbols ($, £, €), commas, and spaces before casting.
+3. The query MUST answer the user's exact question. If the user asked for TOP N, use ORDER BY + LIMIT N.
+   If the user asked for a filter (e.g. "in 2023", "Electronics only"), add a WHERE clause.
+   If the user asked for a comparison, write the comparison in SQL.
+4. Only generate a read-only SELECT statement. No INSERT, UPDATE, DELETE, DROP, or CREATE.
+5. Only use column names that are in the list above — never invent columns.
+6. Return at most 1000 rows.
+7. Return ONLY the raw SQL — no explanation, no markdown fences, no trailing semicolon.
 """.strip()
 
 
@@ -147,9 +155,12 @@ class AnalysisAgent:
         prompt = _SQL_GEN_PROMPT.format(
             domain=domain,
             table_name=table_name,
-            columns=", ".join(sorted(available_cols)),
+            original_question=getattr(spec, "original_question", "") or spec.restatement,
+            columns=", ".join(f'"{c}"' for c in sorted(available_cols)),
             dimensions=dims,
             measures=measures,
+            aggregation=getattr(spec, "aggregation", "sum"),
+            aggregation_upper=getattr(spec, "aggregation", "sum").upper(),
             filters=json.dumps(spec.filters or []),
             time_range=json.dumps(spec.time_range or {}),
         )
@@ -166,7 +177,7 @@ class AnalysisAgent:
             sql = sql_result.sql.strip().rstrip(";")
         except Exception as exc:
             log.warning("analysis_sql_gen_llm_failed", error=str(exc))
-            sql = self._heuristic_sql(dims, measures, table_name)
+            sql = self._heuristic_sql(dims, measures, table_name, count_mode=False, aggregation=getattr(spec, "aggregation", "sum"))
 
         log.info("analysis_sql_generated", sql=sql, dims=dims, measures=measures)
 
@@ -186,7 +197,7 @@ class AnalysisAgent:
         except Exception as exc:
             log.error("analysis_sql_failed", error=str(exc), sql=sql[:200])
             # Retry with a guaranteed-safe heuristic query
-            safe_sql = self._heuristic_sql(dims, measures, table_name)
+            safe_sql = self._heuristic_sql(dims, measures, table_name, aggregation=getattr(spec, "aggregation", "sum"))
             try:
                 async with await db.begin_nested():
                     result = await db.execute(text(safe_sql))
@@ -203,8 +214,9 @@ class AnalysisAgent:
         measures: list[str],
         table_name: str,
         count_mode: bool = False,
+        aggregation: str = "sum",
     ) -> str:
-        """Build a guaranteed-safe GROUP BY query."""
+        """Build a guaranteed-safe GROUP BY query using the requested aggregation."""
         dim_selects = [f'"{d}"' for d in dims]
         group_by_clause = f' GROUP BY {", ".join(f"{chr(34)}{d}{chr(34)}" for d in dims)}' if dims else ""
 
@@ -216,13 +228,28 @@ class AnalysisAgent:
                 f'{group_by_clause} ORDER BY count DESC LIMIT 100'
             )
 
+        # Map aggregation keyword to SQL function
+        agg_fn = {
+            "sum": "SUM",
+            "avg": "AVG",
+            "max": "MAX",
+            "min": "MIN",
+            "count": "COUNT",
+        }.get(aggregation.lower(), "SUM")
+
         # Strip currency symbols/commas before casting — handles $1,234.56 style values
-        agg_selects = [
-            f'AVG(NULLIF(REGEXP_REPLACE("{m}", \'[^0-9.]\', \'\', \'g\'), \'\')::FLOAT) AS "{m}"'
-            for m in measures
-        ]
+        if agg_fn == "COUNT":
+            agg_selects = [
+                f'COUNT(*) AS "{m}_count"'
+                for m in measures
+            ]
+        else:
+            agg_selects = [
+                f'{agg_fn}(NULLIF(REGEXP_REPLACE("{m}", \'[^0-9.-]\', \'\', \'g\'), \'\')::FLOAT) AS "{m}"'
+                for m in measures
+            ]
         selects = dim_selects + agg_selects or ["COUNT(*) AS total_records"]
-        order_by = f' ORDER BY {chr(34)}{dims[0]}{chr(34)}' if dims else ""
+        order_by = f' ORDER BY "{dims[0]}"' if dims else ""
         return (
             f'SELECT {", ".join(selects)} FROM "{table_name}"'
             f'{group_by_clause}{order_by} LIMIT 100'

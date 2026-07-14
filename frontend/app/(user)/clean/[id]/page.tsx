@@ -98,6 +98,14 @@ export default function CleaningPage() {
   const approvedCount = approvedIds.size
   const totalCount = plan.steps.length
 
+  // Dynamically calculate remaining rows based on approved deduplication or deletion steps.
+  const dynamicRowsAfter = plan.steps.reduce((acc, step) => {
+    if (approvedIds.has(step.step_id) && ['deduplicate', 'drop', 'delete'].includes(step.action)) {
+      return acc - step.rows_affected;
+    }
+    return acc;
+  }, plan.total_rows_before)
+
   return (
     <div className='space-y-4'>
       <div>
@@ -110,7 +118,7 @@ export default function CleaningPage() {
       <div className='flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-500 shadow-sm'>
         <span className='font-medium text-slate-700'>{plan.total_rows_before.toLocaleString()} rows</span>
         <span>→ after cleaning →</span>
-        <span className='font-medium text-green-700'>{plan.total_rows_after.toLocaleString()} rows</span>
+        <span className='font-medium text-green-700'>{dynamicRowsAfter.toLocaleString()} rows</span>
       </div>
 
       <HitlBanner checkpoint='#2' detail={`${approvedCount} of ${totalCount} steps approved`} />

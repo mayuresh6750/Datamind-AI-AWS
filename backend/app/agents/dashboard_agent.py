@@ -53,9 +53,9 @@ class DashboardAgent:
         prompt = _DASHBOARD_PROMPT.format(
             domain=domain,
             spec=spec.model_dump_json(indent=2),
-            numeric_results=json.dumps(numeric_results[:20], indent=2, default=str),
+            numeric_results=json.dumps(numeric_results[:10], indent=2, default=str),
             textual_snippets=json.dumps(
-                [r.get("content", "")[:120] for r in textual_results[:3]], indent=2
+                [r.get("content", "")[:80] for r in textual_results[:2]], indent=2
             ),
             schema=DashboardSpec.model_json_schema(),
         )

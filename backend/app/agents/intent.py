@@ -7,7 +7,7 @@ from app.models.schemas import AnalysisSpec, ColumnProfile
 log = structlog.get_logger()
 
 _INTENT_PROMPT = """
-You are an intent parser for a {domain} analytics platform.
+You are an expert intent parser for a {domain} analytics platform.
 
 The user's question is:
 "{question}"
@@ -19,19 +19,28 @@ Parse the intent into a structured analysis spec. Return ONLY valid JSON matchin
 {schema}
 
 Rules:
-- dimensions: grouping columns (categorical, date/time, or textual classification columns)
-- measures: numeric columns to aggregate with AVG/SUM
-  IMPORTANT — "Xwise", "X wise", "by X", "per X" means GROUP BY X. Set measures: [] and
-  use COUNT(*) automatically. Do NOT include unrelated numeric columns as measures.
-  Examples:
-    "citywise lab_test"        → dimensions: ["City","Lab_Test"],  measures: []
-    "lab_test wise test_cost"  → dimensions: ["Lab_Test"],         measures: ["Test_Cost"]
-    "agewise test_cost"        → dimensions: ["Age"],              measures: ["Test_Cost"]
-  Only add a numeric column to measures when the question explicitly asks to aggregate it
-  (e.g. "average cost", "total bill", "sum of amount").
-- suggested_chart_types: 1-3 chart types from [line, bar, table, scatter, pie]
-- restatement: rephrase the question in domain-specific terms to confirm understanding
-- confidence: float 0.0–1.0 reflecting how clearly the question maps to available columns
+- original_question: copy the user's question verbatim, exactly as they asked it.
+- reasoning: Think step-by-step. Identify: (1) grouping/breakdown columns (dimensions), (2) numeric columns to measure (measures), (3) the mathematical operation.
+- dimensions: columns used for grouping/breakdown — "by X", "per X", "Xwise", categorical, or date columns.
+- measures: numeric columns to compute an aggregate on. Leave [] if the question is about counts/frequencies only.
+- aggregation: the mathematical operation the user is asking for. MUST be one of: "sum", "avg", "count", "max", "min".
+  - "total", "sum of", "how much", "overall" → "sum"
+  - "average", "mean", "typical" → "avg"
+  - "how many", "count", "number of", "frequency", "Xwise" (without explicit numeric measure) → "count"
+  - "maximum", "highest", "top", "best", "most" → "max"
+  - "minimum", "lowest", "least", "worst", "fewest" → "min"
+  - If ambiguous, default to "sum" for numeric columns and "count" for non-numeric.
+- filters: any WHERE conditions the user implied (e.g. "in 2023", "for category Electronics").
+- suggested_chart_types: 1-3 chart types from [line, bar, table, scatter, pie].
+- restatement: rephrase the question in clear domain-specific terms to confirm understanding.
+- confidence: float 0.0–1.0 reflecting how clearly the question maps to available columns.
+
+Examples:
+  "total quantity ordered by product category" → dimensions: ["Product_Category"], measures: ["Quantity_Ordered"], aggregation: "sum"
+  "average order value by city" → dimensions: ["City"], measures: ["Order_Value"], aggregation: "avg"
+  "which product had the highest revenue?" → dimensions: ["Product"], measures: ["Revenue"], aggregation: "max"
+  "how many orders per region?" → dimensions: ["Region"], measures: [], aggregation: "count"
+  "top 5 products by sales" → dimensions: ["Product"], measures: ["Sales"], aggregation: "sum"
 """.strip()
 
 
@@ -58,12 +67,30 @@ class IntentAgent:
 
         try:
             spec = await self.llm.structured_completion(prompt, AnalysisSpec, agent_name="intent")
+            # Always preserve the original question exactly
+            spec.original_question = question
         except Exception as exc:
             log.warning("intent_llm_failed", error=str(exc))
             spec = self._heuristic_parse(question, profiles)
 
-        log.info("intent_parsed", domain=domain, confidence=spec.confidence, restatement=spec.restatement)
+        log.info("intent_parsed", domain=domain, confidence=spec.confidence, restatement=spec.restatement, aggregation=spec.aggregation)
         return spec
+
+    def _detect_aggregation(self, question: str) -> str:
+        """Detect the aggregation type from the user's question using keyword matching."""
+        q = question.lower()
+        if any(k in q for k in ("total", "sum of", "sum ", "how much", "overall", "cumulative")):
+            return "sum"
+        if any(k in q for k in ("average", "avg", "mean", "typical")):
+            return "avg"
+        if any(k in q for k in ("maximum", "highest", "max ", "top ", "best", "most", "largest", "biggest", "peak")):
+            return "max"
+        if any(k in q for k in ("minimum", "lowest", "min ", "least", "worst", "fewest", "smallest")):
+            return "min"
+        if any(k in q for k in ("count", "how many", "number of", "frequency", "distribution", "wise", " per ", "breakdown")):
+            return "count"
+        # Default to sum for numeric questions
+        return "sum"
 
     def _heuristic_parse(self, question: str, profiles: list[ColumnProfile]) -> AnalysisSpec:
         q = question.lower()
@@ -74,41 +101,33 @@ class IntentAgent:
 
         scored = sorted(profiles, key=lambda p: _col_score(p.name), reverse=True)
 
-        # Only genuine numeric (float/int) columns can be measures — NOT categoricals.
-        # A column with classification="numeric" and dtype="categorical" (e.g. Department)
-        # must be treated as a dimension, not a measure; doing AVG("Department") would crash.
-        _numeric_dtypes = {"float", "int", "int64", "float64", "numeric"}
+        # Only genuine numeric (float/int) columns can be measures.
+        _numeric_dtypes = {"float", "int", "int64", "float64", "numeric", "integer"}
         matched_measures = [
             p.name for p in scored
             if p.classification == "numeric" and p.dtype in _numeric_dtypes and _col_score(p.name) > 0
         ][:2]
         matched_dims = [
             p.name for p in scored
-            if (p.classification in ("textual", "ambiguous") or p.dtype == "categorical")
+            if (p.classification in ("structured", "textual", "ambiguous") or p.dtype == "categorical")
             and _col_score(p.name) > 0
         ][:2]
 
-        # Detect count-type questions — no numeric measure needed, just GROUP BY dimensions.
-        # "citywise", "lab_test wise", "city wise" all mean GROUP BY → COUNT(*).
-        import re as _re
-        _has_wise = bool(_re.search(r'\bwise\b', q))
-        is_count_q = _has_wise or any(k in q for k in (
-            "count", "how many", "number of", "frequency", "distribution",
-            "wise count", "per ", "breakdown",
-        ))
+        aggregation = self._detect_aggregation(question)
+        is_count_q = aggregation == "count"
 
         if is_count_q:
             measures: list[str] = []
             dimensions = matched_dims or [
-                p.name for p in profiles if p.dtype == "categorical"
-            ][:2] or [p.name for p in profiles if p.classification in ("textual", "ambiguous")][:2]
+                p.name for p in profiles if p.dtype in ("categorical",)
+            ][:2] or [p.name for p in profiles if p.classification in ("structured", "textual", "ambiguous")][:2]
         else:
             measures = matched_measures or [
                 p.name for p in profiles if p.classification == "numeric" and p.dtype in _numeric_dtypes
             ][:2]
             dimensions = matched_dims or [
                 p.name for p in profiles if p.dtype == "categorical"
-            ][:2] or [p.name for p in profiles if p.classification in ("textual", "ambiguous")][:2]
+            ][:2] or [p.name for p in profiles if p.classification in ("structured", "textual", "ambiguous")][:2]
 
         if not dimensions and profiles:
             dimensions = [profiles[0].name]
@@ -121,8 +140,11 @@ class IntentAgent:
             chart_types = ["bar", "table"]
 
         return AnalysisSpec(
+            reasoning="Heuristic fallback used due to LLM failure or timeout.",
+            original_question=question,
             dimensions=dimensions,
             measures=measures,
+            aggregation=aggregation,
             suggested_chart_types=chart_types,
             restatement=question,
             confidence=0.4,

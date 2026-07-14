@@ -74,7 +74,19 @@ class ColumnProfile(BaseModel):
     null_count: int
     distinct_count: int
     avg_length: Optional[float] = None
-    classification: str  # numeric | textual | ambiguous
+    classification: str  # numeric | structured | textual | ambiguous
+
+
+# ─── LLM Column Classification (used internally by IngestionAgent) ────────────
+
+class ColumnClassificationItem(BaseModel):
+    name: str
+    classification: str  # numeric | textual
+    dtype: str            # float | integer | text | categorical | datetime | boolean
+
+class ColumnClassificationResponse(BaseModel):
+    columns: list[ColumnClassificationItem]
+
 
 class MergePlan(BaseModel):
     strategy: str  # single | union | join | separate
@@ -122,8 +134,11 @@ class IntentRequest(BaseModel):
     question: str
 
 class AnalysisSpec(BaseModel):
+    reasoning: str
+    original_question: str = ""      # the user's exact question, passed to the SQL agent
     dimensions: list[str]
     measures: list[str]
+    aggregation: str = "sum"          # sum | avg | count | max | min — the mathematical operation requested
     time_range: Optional[dict] = None
     filters: Optional[list[dict]] = None
     suggested_chart_types: list[str]

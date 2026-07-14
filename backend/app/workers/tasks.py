@@ -87,9 +87,11 @@ async def run_ingest_pipeline(dataset_id: str, user_id: str, job_id: str) -> Non
     from app.core.storage import StorageClient
     from app.models.db import Dataset, HITLDecision, PipelineRun
     from app.agents.ingestion import IngestionAgent
+    from app.core.llm import LLMClient
     from sqlalchemy import select
 
-    ingestion = IngestionAgent()
+    llm_client = LLMClient()
+    ingestion = IngestionAgent(llm=llm_client)
 
     async with AsyncSessionLocal() as db:
         try:
@@ -133,7 +135,7 @@ async def run_ingest_pipeline(dataset_id: str, user_id: str, job_id: str) -> Non
                     "uploaded_at": uploaded_at,
                     "archive_path": path,
                 })
-                profiles = ingestion.profile_columns(rows)
+                profiles = await ingestion.profile_columns(rows)
                 file_profiles.append((filename, profiles))
                 file_formats.append(fmt)
                 all_rows.extend(rows)
@@ -244,7 +246,7 @@ async def run_cleaning_plan_pipeline(dataset_id: str, merge_decision: dict, job_
 
             # Apply the user-confirmed merge strategy before generating the cleaning plan
             all_rows = _apply_merge(parsed_files, merge_proposal, merge_decision)
-            profiles = ingestion.profile_columns(all_rows)
+            profiles = await ingestion.profile_columns(all_rows)
 
             update_job(job_id, "running", progress_pct=50, current_step="generating_cleaning_plan")
 
@@ -354,7 +356,7 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
             if effective_strategy == "union" and merge_hitl and merge_hitl.proposal_json.get("column_profiles"):
                 profiles = [ColumnProfileSchema(**p) for p in merge_hitl.proposal_json["column_profiles"]]
             else:
-                profiles = ingestion.profile_columns(all_rows)
+                profiles = await ingestion.profile_columns(all_rows)
 
             # Load cleaning plan proposal
             hitl_result = await db.execute(
@@ -383,27 +385,29 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
 
             update_job(job_id, "running", progress_pct=75, current_step="routing_to_postgresql")
 
-            # Layer 3: Route numeric columns to PostgreSQL — non-fatal savepoint
-            numeric_cols = [p.name for p in profiles if p.classification == "numeric"]
+            # Layer 3: Route numeric + structured columns to PostgreSQL — non-fatal savepoint
+            # Per the PRD: "numeric/structured → Postgres + JSON; textual → Supabase Vector (pgvector) + JSON"
+            # 'structured' includes categories, dates, identifiers — needed for GROUP BY in SQL queries
+            sql_cols = [p.name for p in profiles if p.classification in ("numeric", "structured")]
             textual_cols = [p.name for p in profiles if p.classification == "textual"]
             table_name = f"ds_{dataset_id.replace('-', '_')}"
 
             try:
                 async with await db.begin_nested():
-                    if numeric_cols and cleaned_rows:
-                        col_defs = ", ".join(f'"{c}" TEXT' for c in numeric_cols)
+                    if sql_cols and cleaned_rows:
+                        col_defs = ", ".join(f'"{c}" TEXT' for c in sql_cols)
                         await db.execute(text(f'CREATE TABLE IF NOT EXISTS "{table_name}" ({col_defs})'))
                         # SQLAlchemy bind parameters must not contain spaces or special chars.
                         # Map each column to a safe param name (spaces/hyphens → underscore).
                         import re as _re
-                        safe_param = {c: _re.sub(r'[^a-zA-Z0-9_]', '_', c) for c in numeric_cols}
-                        col_names = ", ".join(f'"{c}"' for c in numeric_cols)
-                        placeholders = ", ".join(f":{safe_param[c]}" for c in numeric_cols)
+                        safe_param = {c: _re.sub(r'[^a-zA-Z0-9_]', '_', c) for c in sql_cols}
+                        col_names = ", ".join(f'"{c}"' for c in sql_cols)
+                        placeholders = ", ".join(f":{safe_param[c]}" for c in sql_cols)
                         insert_sql = text(f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})')
                         # Chunk to stay under asyncpg's 32 767-parameter limit.
                         for i in range(0, len(cleaned_rows), _INSERT_CHUNK):
                             chunk_vals = [
-                                {safe_param[c]: str(row.get(c, "")) for c in numeric_cols}
+                                {safe_param[c]: str(row.get(c, "")) for c in sql_cols}
                                 for row in cleaned_rows[i:i + _INSERT_CHUNK]
                             ]
                             await db.execute(insert_sql, chunk_vals)
@@ -570,7 +574,7 @@ async def run_intent_analysis_pipeline(dataset_id: str, question: str, user_id: 
                     cleaned_rows.extend(ingestion_fallback.parse_content(fmt, content))
                 log.warning("json_download_fallback", dataset_id=dataset_id, rows=len(cleaned_rows))
 
-            profiles = ingestion_fallback.profile_columns(cleaned_rows)
+            profiles = await ingestion_fallback.profile_columns(cleaned_rows)
 
             # One shared LLMClient passed to all 4 agents — accumulates tokens for the full run
             llm_client = LLMClient()
