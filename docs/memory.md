@@ -100,7 +100,7 @@ These three features must ship in Phase 1 regardless of time pressure:
 
 | Agent | Phase | What It Does |
 |---|---|---|
-| Supervisor | P1 | LangGraph state machine; routes to sub-agents; enforces HITL gates; retries |
+| Supervisor | P2 (scaffold in `supervisor.py`) | Phase 1 uses `tasks.py` functions; graph routing planned for P2 |
 | Domain | P1 | Loads domain prompt pack; injects vocabulary/KPIs/validation rules into all downstream contexts |
 | Ingestion | P1 | Format detection, parsing, profiling, column classification (numeric/textual/ambiguous), merge planning |
 | Cleaning Plan | P1 | Drafts numbered plan with rationale + confidence per step — does NOT execute |
@@ -183,7 +183,7 @@ Phase 2 adds: Education, Manufacturing, Real Estate; admin editor for packs.
 | Authentication | Supabase Auth (email/password, JWT session, email verification, refresh tokens) |
 | Backend API | Python 3.11+ · FastAPI · Pydantic v2 · Supabase Auth JWT validation |
 | Embeddings | Qwen3-Embedding-0.6B (sentence-transformers, self-hosted, 8K context, provider-neutral) |
-| Agent Orchestration | LangGraph (supervisor pattern) |
+| Agent Orchestration | FastAPI BackgroundTasks + `tasks.py` (Phase 1) |
 | Ingestion/Parsing | · Python stdlib (csv, json) · openpyxl · python-magic · chardet |
 | LLM Abstraction | LiteLLM-compatible custom interface |
 | Raw Storage | Supabase Storage (versioned bucket, per-user prefix, AES-256) |
@@ -303,7 +303,7 @@ Key async endpoints:
 
 | Decision | Choice | Reason |
 |---|---|---|
-| Agent orchestration | LangGraph | Mature supervisor pattern; HITL pause/resume is first-class |
+| Agent orchestration | `tasks.py` + BackgroundTasks (P1); `supervisor.py` graph (P2) | Phase 1 uses imperative async functions; graph scaffold exists but is not wired |
 | LLM abstraction | LiteLLM-compatible custom layer | Provider portability without rewriting agents; per-tenant routing |
 | Columnar format | JSON | Columnar, self-describing, 60–80% compression vs CSV, PostgreSQL-native |
 | In-process query engine | PostgreSQL | PostgreSQL runs locally for dev; scales with Supabase Storage in prod |
@@ -312,7 +312,7 @@ Key async endpoints:
 | Storage platform | Supabase (Storage + Database + Vault) | All data layers on one platform; no AWS dependency |
 | LLM providers | Google Gemini 3.5 Flash (P1) | Free/low-cost API tiers; LiteLLM-compatible; swappable |
 | Frontend | Next.js 14 App Router | Dual route groups (/app and /admin) map naturally to dual UI separation |
-| HITL state durability | Persist LangGraph state to Supabase Database + Supabase Storage before pausing | Worker crash does not lose user decisions |
+| HITL state durability | Persist pipeline state to Supabase Database + Supabase Storage between `tasks.py` stages | Worker crash does not lose user decisions |
 | SQL safety | sqlglot parsing before execution | Blocks DDL/writes from LLM-generated SQL without regex hacks |
 
 ---

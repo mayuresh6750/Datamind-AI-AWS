@@ -54,7 +54,7 @@ Business analysts, founders and operators at SMBs, product managers, and small d
 
 ## Why Now
 
-- Agentic frameworks (LangGraph, function-calling models) are mature enough to coordinate multi-step data tasks reliably while pausing for human approval at well-defined checkpoints.
+- Agentic frameworks and function-calling models are mature enough to coordinate multi-step data tasks reliably while pausing for human approval at well-defined checkpoints.
 - Frontier LLMs are now interchangeable enough that a thin abstraction layer (LiteLLM-compatible) lets us swap providers per tenant without rewriting agents — important for cost, compliance, and avoiding lock-in.
 - The SMB and mid-market BI segment remains underserved — existing tools either assume a data team (Looker, Tableau) or skip the cleaning layer (Julius AI, ChatGPT Code Interpreter, Power BI Copilot), and almost none of them ask the user about their domain or surface cleaning decisions transparently.
 - JSON plus PostgreSQL make a unified storage architecture simple and operationally affordable, and pgvector on PostgreSQL make text-data routing economical at SMB volume.
@@ -95,7 +95,7 @@ The result is a familiar pattern: the people who have the questions cannot answe
 
 ## Why Now
 
-Three things changed in the last 18 months. First, frontier LLMs became good enough at structured reasoning over tables to be trusted with bounded cleaning decisions, when wrapped in guardrails and confidence scoring. Second, agent orchestration (LangGraph, structured tool-use APIs) made it feasible to compose multi-step pipelines that recover from failure rather than collapsing on the first ambiguous row. Third, serverless storage and query primitives (Supabase Storage + PostgreSQL) made the data architecture affordable for a small team. Each on its own would not be enough. Together they make the product viable for a small team to ship quickly.
+Three things changed in the last 18 months. First, frontier LLMs became good enough at structured reasoning over tables to be trusted with bounded cleaning decisions, when wrapped in guardrails and confidence scoring. Second, agent orchestration (structured tool-use APIs and imperative async task pipelines) made it feasible to compose multi-step pipelines that recover from failure rather than collapsing on the first ambiguous row. Third, serverless storage and query primitives (Supabase Storage + PostgreSQL) made the data architecture affordable for a small team. Each on its own would not be enough. Together they make the product viable for a small team to ship quickly.
 
 
 
@@ -345,7 +345,7 @@ Figure 1. DataMind AI end-to-end architecture. Solid arrows = control/request fl
 | Presentation — User UI | Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, Recharts | Domain selection, file upload, validation/merge UI, HITL cleaning review, intent capture, dashboard, audit view |
 | Presentation — Admin UI | Next.js (separate route group /admin/*, RBAC-gated), shadcn/ui, Recharts | User management, LLM/domain config, billing & plans (P2), system health, audit log viewer, domain pack viewer (read-only P1) |
 | API Gateway (Backend) | Python 3.11+, FastAPI, Pydantic v2, JWT auth, RBAC middleware | REST API, request validation, async job dispatch, role enforcement |
-| Agent Orchestration | LangGraph (supervisor pattern), Pydantic-validated outputs | Multi-agent pipeline coordination, state machine, retry, HITL gates |
+| Agent Orchestration | FastAPI BackgroundTasks + `backend/app/workers/tasks.py` (Phase 1) | Imperative async pipeline; agents called directly; HITL via HTTP + `dataset.status` |
 | LLM Provider Layer | LiteLLM-compatible abstraction; Google Gemini 3.5 Flash (mistral-small) + Google Gemini 3.5 Flash (kimi-k2) in P1; +Gemini, Azure, Bedrock, Ollama in P2 | Per-tenant model config; per-agent routing; cost & latency tracking |
 | Ingestion / Conversion | openpyxl, python-magic, chardet, Python stdlib (csv, json) | Format detection, parsing, multi-file merge planning, JSON normalisation, type-routing classification |
 | Layer 1 — Raw Storage | Supabase Storage (versioned bucket, per-user prefix) | Immutable source-of-truth for every uploaded file |
@@ -392,7 +392,7 @@ Synchronous endpoints (auth, dataset list, dashboard fetch) return in under 300m
 
 # 7. Agentic AI Design
 
-DataMind uses a supervisor-agent pattern coordinated by LangGraph. A supervisor agent receives a job, decomposes it into a sequence of specialised steps, delegates to sub-agents, validates their structured outputs, decides what to do on failure, and pauses at human-in-the-loop checkpoints to wait for user decisions. Each agent has a narrow scope, a defined tool set, an output schema enforced by Pydantic, and its own prompt template under version control. All LLM calls flow through a configurable provider abstraction — agents are model-agnostic.
+DataMind uses a multi-agent pipeline. **Phase 1 orchestration** is imperative: FastAPI `BackgroundTasks` dispatch async functions in `backend/app/workers/tasks.py` (there is no `async.py`). Each stage calls its agent directly. `backend/app/agents/supervisor.py` contains a Phase 2 orchestration scaffold that is not invoked in production. HITL gates pause between stages via HTTP endpoints and `dataset.status` in Postgres.
 
 
 ## Configurable LLM Provider Layer
@@ -416,7 +416,7 @@ The agent set is split across phases. Phase 1 ships the agents needed for the mu
 
 | Agent | Role | Phase | Key Tools |
 | --- | --- | --- | --- |
-| Supervisor | Orchestrates pipeline; routes, retries, aggregates; enforces HITL gates | P1 | LangGraph state machine |
+| Supervisor | Orchestrates pipeline; routes, retries, aggregates; enforces HITL gates | P2 (scaffold only in Phase 1) | `supervisor.py` graph scaffold (Phase 2); Phase 1 uses `tasks.py` |
 | Domain | Loads domain prompt pack (vocabulary, KPIs, validation rules) and exposes it to all downstream agents | P1 | Prompt pack loader, Postgres lookup |
 | Ingestion | Detects format, parses, profiles, classifies columns as numeric/structured vs textual, drafts merge plan for multi-file uploads | P1 | openpyxl, python-magic, chardet, Python stdlib (csv, json) for parsing and profiling |
 | Cleaning Plan | Drafts a numbered cleaning plan with rationale + confidence per step. Does NOT execute. | P1 | LLM via abstraction, Python stdlib profiling (statistics) |
@@ -483,7 +483,7 @@ Each agent's tool set is the smallest set of operations sufficient to do its job
 
 ### Short-term memory (per-pipeline)
 
-- Shared LangGraph state object holds the pipeline state: dataset_id, raw_uris, current json_uri, profile_json, merge_plan, cleaning_plan, hitl_decisions, audit log, accumulated confidence.
+- Pipeline state between stages is persisted via Postgres (`datasets`, `hitl_decisions`, `pipeline_runs`) and Supabase Storage (archive/json URIs). Each `tasks.py` function re-loads state on entry. There is no shared graph state object in Phase 1.
 - Persisted to Supabase Storage + PostgreSQL after every agent step so a paused (HITL) or failed pipeline can be resumed without re-running upstream agents.
 
 ### Long-term memory
@@ -1645,7 +1645,7 @@ DataMind's positioning: the only tool that takes a raw, messy file from an SMB o
 - LLM provider availability (configurable; Phase 1 uses Google Gemini 3.5 Flash). The configurable abstraction (F11) is the primary mitigation against single-vendor risk.
 - Stripe (P2): payment processing, hosted Checkout, hosted Customer Portal, webhook delivery.
 - Supabase regional availability.
-- Open-source library health: Python stdlib, LangGraph, LiteLLM, Vega-Lite, Recharts, FastAPI.
+- Open-source library health: Python stdlib, LiteLLM, Vega-Lite, Recharts, FastAPI (langgraph library installed for Phase 2 scaffold only).
 - GitHub availability (CI/CD).
 
 ## Key Assumptions

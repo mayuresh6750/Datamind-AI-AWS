@@ -54,7 +54,7 @@ Built around four deliberate principles: (1) domain-first approach — ask users
 | Authentication | Supabase Auth (email/password, JWT session management, email verification) | Sign-up, login, logout, JWT issuance, session refresh, role-based redirect |
 | API Gateway | Python 3.11+, FastAPI, Pydantic v2, Supabase Auth JWT validation, RBAC middleware | REST API, request validation, async job dispatch, role enforcement |
 | Embeddings | Qwen3-Embedding-0.6B (sentence-transformers, self-hosted in FastAPI container) | Text column embeddings for pgvector; user intent embeddings; 8K context, provider-neutral |
-| Agent Orchestration | LangGraph (supervisor pattern), Pydantic-validated outputs | Multi-agent pipeline coordination, state machine, retry, HITL gates |
+| Agent Orchestration | FastAPI BackgroundTasks + `tasks.py` (Phase 1) | Imperative async pipeline; agents called directly; HITL via HTTP |
 | LLM Provider Layer | LiteLLM-compatible abstraction; Google Gemini 3.5 Flash | Per-tenant model config; per-agent routing; cost & latency tracking |
 | Ingestion / Conversion | openpyxl, python-magic, chardet, Python stdlib (csv, json) | Format detection, parsing, multi-file merge planning, JSON normalisation, type-routing classification |
 | Layer 1 — Raw Storage | Supabase Storage (versioned bucket, per-user prefix) | Immutable source-of-truth for every uploaded file |

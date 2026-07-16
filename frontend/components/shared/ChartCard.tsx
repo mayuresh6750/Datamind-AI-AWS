@@ -95,20 +95,24 @@ function BarChartView({ title, data, x_field, y_field, color_field }: {
     [y_field]: parseFloat(String(row[y_field] ?? 0)) || 0,
   }))
 
-  // Truncate long x-axis labels
-  const tickFormatter = (v: string) => v.length > 14 ? v.slice(0, 13) + '…' : v
+  // Truncate long x-axis labels; composite labels like "CBC · 2026-06-23" get more room
+  const tickFormatter = (v: string) => v.length > 22 ? v.slice(0, 21) + '…' : v
 
   return (
     <ChartShell title={title}>
       <ResponsiveContainer width='100%' height={220}>
-        <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+        <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: chartData.length > 6 ? 28 : 4 }}>
           <CartesianGrid strokeDasharray='3 3' stroke='#f1f5f9' vertical={false} />
           <XAxis
             dataKey={x_field}
-            tick={{ fontSize: 11, fill: '#64748b' }}
+            tick={{ fontSize: 10, fill: '#64748b' }}
             tickFormatter={tickFormatter}
             axisLine={false}
             tickLine={false}
+            interval={0}
+            angle={chartData.length > 4 ? -25 : 0}
+            textAnchor={chartData.length > 4 ? 'end' : 'middle'}
+            height={chartData.length > 4 ? 50 : 30}
           />
           <YAxis
             tick={{ fontSize: 11, fill: '#64748b' }}

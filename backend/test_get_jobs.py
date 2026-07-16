@@ -60,7 +60,7 @@ VALID_SUBSTATUS = {
     "awaiting_hitl_intent",
 }
 
-# Pipeline steps in execution order (mirrors LangGraph node names in supervisor.py)
+# Pipeline steps in execution order (mirrors supervisor.py node names; production uses tasks.py)
 PIPELINE_STEPS = [
     "load_domain",
     "ingest",

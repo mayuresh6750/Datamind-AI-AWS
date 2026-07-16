@@ -124,9 +124,9 @@ class AnalysisAgent:
                 log.info("analysis_text_measures_demoted_to_dims", text_as_dims=text_as_dims)
 
         # Detect count-type queries: user asked for counts but no numeric measure was found
-        is_count_query = dims and not measures
-
+        is_count_query = dims and (not measures or getattr(spec, "aggregation", "") == "count")
         if is_count_query:
+            measures = []
             # Short-circuit: generate COUNT(*) SQL directly without an LLM call
             sql = self._heuristic_sql(dims, [], table_name, count_mode=True)
             log.info("analysis_count_query_shortcircuit", dims=dims, table=table_name)
@@ -139,6 +139,23 @@ class AnalysisAgent:
             except Exception as exc:
                 log.error("analysis_count_sql_failed", error=str(exc), sql=sql[:200])
                 return []
+
+        aggregation = getattr(spec, "aggregation", "sum")
+
+        # Standard group-by aggregations are deterministic — skip LLM SQL to avoid
+        # row-level SELECTs that ignore GROUP BY (e.g. returning Lab_Test + Test_Date + raw cost).
+        if dims and measures and not (spec.filters or spec.time_range):
+            sql = self._heuristic_sql(dims, measures, table_name, count_mode=False, aggregation=aggregation)
+            log.info("analysis_heuristic_sql_shortcircuit", sql=sql, dims=dims, measures=measures, aggregation=aggregation)
+            try:
+                async with await db.begin_nested():
+                    result = await db.execute(text(sql))
+                    rows = [dict(zip(result.keys(), row)) for row in result.fetchall()]
+                log.info("analysis_heuristic_sql_executed", rows=len(rows), table=table_name)
+                return rows
+            except Exception as exc:
+                log.error("analysis_heuristic_sql_failed", error=str(exc), sql=sql[:200])
+                # Fall through to LLM path below
 
         if not dims and not measures:
             log.warning("analysis_no_matching_columns", spec_dims=spec.dimensions, spec_measures=spec.measures, available=list(available_cols))
@@ -159,8 +176,8 @@ class AnalysisAgent:
             columns=", ".join(f'"{c}"' for c in sorted(available_cols)),
             dimensions=dims,
             measures=measures,
-            aggregation=getattr(spec, "aggregation", "sum"),
-            aggregation_upper=getattr(spec, "aggregation", "sum").upper(),
+            aggregation=aggregation,
+            aggregation_upper=aggregation.upper(),
             filters=json.dumps(spec.filters or []),
             time_range=json.dumps(spec.time_range or {}),
         )
@@ -177,7 +194,7 @@ class AnalysisAgent:
             sql = sql_result.sql.strip().rstrip(";")
         except Exception as exc:
             log.warning("analysis_sql_gen_llm_failed", error=str(exc))
-            sql = self._heuristic_sql(dims, measures, table_name, count_mode=False, aggregation=getattr(spec, "aggregation", "sum"))
+            sql = self._heuristic_sql(dims, measures, table_name, count_mode=False, aggregation=aggregation)
 
         log.info("analysis_sql_generated", sql=sql, dims=dims, measures=measures)
 
@@ -249,7 +266,8 @@ class AnalysisAgent:
                 for m in measures
             ]
         selects = dim_selects + agg_selects or ["COUNT(*) AS total_records"]
-        order_by = f' ORDER BY "{dims[0]}"' if dims else ""
+        order_col = f'"{measures[0]}"' if measures else (f'"{dims[0]}"' if dims else "")
+        order_by = f" ORDER BY {order_col} DESC" if order_col else ""
         return (
             f'SELECT {", ".join(selects)} FROM "{table_name}"'
             f'{group_by_clause}{order_by} LIMIT 100'

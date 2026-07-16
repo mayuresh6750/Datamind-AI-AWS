@@ -24,7 +24,7 @@ DataMind AI is an agentic data intelligence platform that takes a business user 
 | Frontend | Next.js 14, TypeScript, Tailwind CSS, shadcn/ui, Recharts |
 | Authentication | Supabase Auth (email/password, JWT session management, email verification, refresh tokens) |
 | Backend | Python 3.11+, FastAPI, Pydantic v2, FastAPI BackgroundTasks |
-| Agent Orchestration | LangGraph (supervisor pattern) |
+| Agent Orchestration | **Phase 1 (actual):** `backend/app/workers/tasks.py` + FastAPI BackgroundTasks. **Phase 2 (planned):** graph orchestration in `supervisor.py` |
 | LLM Provider | LiteLLM abstraction; Google Gemini 3.5 Flash (Phase 1) |
 | Embeddings | Qwen3-Embedding-0.6B (sentence-transformers, self-hosted, 8K context, provider-neutral) |
 | Layer 1 — Raw Storage | Supabase Storage (versioned, per-user prefix) |
@@ -53,7 +53,7 @@ DataMind AI is an agentic data intelligence platform that takes a business user 
 
 | Agent | Role |
 |-------|------|
-| Supervisor | Orchestrates pipeline; routes, retries, aggregates; enforces HITL gates |
+| Supervisor | Orchestrates pipeline (Phase 2); Phase 1 uses `tasks.py` functions per stage |
 | Domain | Loads domain prompt pack (vocabulary, KPIs, validation rules) |
 | Ingestion | Detects format, parses, profiles, classifies columns, drafts merge plan |
 | Cleaning Plan | Drafts numbered cleaning plan with rationale + confidence. Does NOT execute. |
@@ -89,12 +89,12 @@ Domain Selection → Upload → Detect & Profile → HITL #1 (Schema & Merge)
 DataMind-AI/
 ├── backend/    # FastAPI application
 │ ├── app/
-│ │ ├── agents/  # LangGraph agents
+│ │ ├── agents/  # Agent modules (supervisor.py = Phase 2 scaffold; production uses tasks.py)
 │ │ ├── api/v1/  # API endpoints (auth, datasets, dashboards, etc.)
 │ │ ├── core/   # Config, database, security, storage
-│ │ └── models/  # Pydantic/SQLAlchemy models
-│ ├── workers/   # FastAPI BackgroundTasks handlers
-│ └── tests/   # Unit, integration, E2E tests
+│ │ ├── models/  # Pydantic/SQLAlchemy models
+│ │ └── workers/tasks.py  # Phase 1 pipeline orchestration (BackgroundTasks entry point)
+│ ├── tests/   # Unit, integration, E2E tests
 ├── frontend/    # Next.js 14 application
 │ ├── app/    # Routes (/app/* user UI, /admin/* admin UI)
 │ ├── components/  # Reusable UI components

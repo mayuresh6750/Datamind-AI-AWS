@@ -436,7 +436,8 @@ class EmbeddingModel:
 DataMind-AI/
 ├── backend/
 │   ├── app/
-│   │   ├── agents/          # LangGraph agents (Domain, Ingestion, Cleaning, Intent, Analysis, Dashboard, Insights)
+│   │   ├── agents/          # Agent modules (supervisor.py = Phase 2 scaffold, not wired in P1)
+│   │   ├── workers/tasks.py # Phase 1 pipeline orchestration (BackgroundTasks entry point)
 │   │   ├── api/v1/          # FastAPI route handlers
 │   │   │   ├── auth.py
 │   │   │   ├── datasets.py

@@ -11,7 +11,7 @@
 |---|---|---|
 | **FE** | Frontend Developer | Next.js 14, TypeScript, Tailwind, shadcn/ui, Recharts, Vega-Lite |
 | **BE** | Backend Developer | FastAPI, Pydantic v2, Supabase Database (PostgreSQL), Alembic, FastAPI BackgroundTasks, Redis |
-| **AI** | AI / Agent Engineer | LangGraph agents, LLM abstraction (Google Gemini 3.5 Flash), Qwen3-Embedding-0.6B (sentence-transformers), Supabase Vector (pgvector), PostgreSQL, domain packs |
+| **AI** | AI / Agent Engineer | Pipeline agents (`tasks.py`), LLM abstraction (Google Gemini 3.5 Flash), Qwen3-Embedding-0.6B (sentence-transformers), Supabase Vector (pgvector), PostgreSQL, domain packs |
 | **DO** | DevOps / Infra Engineer | Supabase (Storage + Database + Vault), Docker, GitHub Actions CI/CD, GHCR, Prometheus/Grafana |
 | **QA** | QA Engineer | Unit tests, integration tests, E2E tests, golden datasets, performance |
 
@@ -86,7 +86,7 @@ Priority: **P1** = Must-have (blocks release) | **P2** = High | **P3** = Medium
 | S3-02 | HITL #1 interaction — column type-routing override, merge key change, exclude column/file | FE | P1 | 3 | S3-01 |
 | S3-03 | GET /datasets/{id}/merge-plan — return ingestion profile with schema, type-routing, merge proposal | BE | P1 | 2 | S2-05 |
 | S3-04 | POST /datasets/{id}/merge-plan/decision — record user decision in hitl_decisions, enqueue next step | BE | P1 | 2 | S3-03 |
-| S3-05 | LangGraph Supervisor — state machine setup, step routing, HITL pause/resume, retry on failure | AI | P1 | 4 | S1-05 |
+| S3-05 | Pipeline supervisor — state machine setup, step routing, HITL pause/resume, retry on failure | AI | P1 | 4 | S1-05 | **Partial:** `supervisor.py` scaffold only; production uses `tasks.py` |
 | S3-06 | HITL Gate Manager — pause_pipeline_for_decision(), resume_pipeline_with_decision(), state snapshot to Supabase Storage | AI | P1 | 3 | S3-05 |
 | S3-07 | Pipeline state persistence — serialise full pipeline state to Supabase Storage + Supabase Database after every agent step | BE | P1 | 3 | S3-05, S1-03 |
 | S3-08 | LLM Provider Abstraction — LiteLLM-compatible interface, structured_completion(), Pydantic output validation, retry logic (3×) | AI | P1 | 4 | S1-05 |

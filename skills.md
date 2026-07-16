@@ -272,7 +272,8 @@ Use these patterns when building agentic data intelligence systems: platforms th
 The core pattern for any agent pipeline that mutates user data. Agents PROPOSE, users DISPOSE, then agents EXECUTE.
 
 ```python
-# LangGraph state machine — two-phase gate per destructive step
+# Phase 2 orchestration scaffold (supervisor.py) — two-phase gate per destructive step
+# Phase 1 uses HTTP-driven HITL between tasks.py pipeline functions
 from langgraph.graph import StateGraph
 
 class PipelineState(BaseModel):
@@ -291,7 +292,7 @@ def cleaning_plan_node(state: PipelineState) -> PipelineState:
  return state
 
 def hitl_gate(state: PipelineState) -> str:
- # LangGraph conditional edge — pause until user decision is posted
+ # Phase 2 conditional edge — pause until user decision is posted
  if state.status == PipelineStatus.AWAITING_HITL_CLEANING:
   return "wait"  # worker releases; state stored in DB
  return "execute"
@@ -466,7 +467,7 @@ def validate_readonly_sql(sql: str, allowed_table: str) -> None:
 Full setup sequence for a DataMind-style platform:
 
 1. `db-architect` → design 4-layer storage schema: users (FK→auth.users), datasets, pipeline_runs, hitl_decisions, llm_provider_config; PostgreSQL + pgvector
-2. `backend-builder` → FastAPI with Supabase Auth JWT validation, RBAC middleware, FastAPI BackgroundTasks job dispatch, LangGraph supervisor
+2. `backend-builder` → FastAPI with Supabase Auth JWT validation, RBAC middleware, FastAPI BackgroundTasks job dispatch, `tasks.py` pipeline (Phase 1); `supervisor.py` scaffold for Phase 2
 3. `/guardrail-pipeline datamind ["user","admin"] ["datasets","hitl_decisions","audit_events"]`
 4. `frontend-builder` → Next.js dual UI (`/app/*` and `/admin/*`) with Supabase Auth SDK and domain-aware components
 5. `api-integrator` → LiteLLM-compatible provider abstraction for Google Gemini 3.5 Flash (P1); Qwen3-Embedding-0.6B (sentence-transformers) for embeddings; API keys from Supabase Vault

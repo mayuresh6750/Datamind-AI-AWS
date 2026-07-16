@@ -7,10 +7,10 @@
 DataMind is a three-tier, cloud-native system:
 
 - **Presentation** — Next.js 14 frontend with two distinct UI surfaces (User `/app/*` and Admin `/admin/*`)
-- **Application** — Python/FastAPI API gateway + LangGraph agent orchestration service
+- **Application** — Python/FastAPI API gateway + agent pipeline (`backend/app/workers/tasks.py`, dispatched via FastAPI BackgroundTasks)
 - **Infrastructure** — Supabase Storage (four-layer storage), Supabase Database (PostgreSQL) + Supabase Vector (pgvector) (vector), Redis/FastAPI BackgroundTasks (job queue)
 
-The backend separates the API gateway from the agent worker so long-running pipelines scale independently of synchronous request traffic. All LLM calls flow through a configurable provider abstraction (LiteLLM-compatible).
+The backend separates the API gateway from long-running pipeline work so ingestion, cleaning, and dashboard generation do not block synchronous request traffic. **Phase 1 orchestration is imperative** — there is no `async.py`; four async functions in `tasks.py` call agents directly. `supervisor.py` holds a Phase 2 orchestration scaffold that is **not wired** in production (see `docs/LangGraph-Orchestration-Analysis.md`). All LLM calls flow through a configurable provider abstraction (LiteLLM-compatible).
 
 ---
 
@@ -38,9 +38,13 @@ The backend separates the API gateway from the agent worker so long-running pipe
 └──────────────────────────────┬──────────────────────────────────────┘
         │ Enqueue / Dequeue
 ┌──────────────────────────────▼──────────────────────────────────────┐
-│ AGENT ORCHESTRATION LAYER           │
+│ AGENT PIPELINE LAYER (Phase 1)          │
 │                  │
-│ LangGraph Supervisor Agent (state machine)       │
+│ FastAPI BackgroundTasks → tasks.py async functions      │
+│ run_ingest_pipeline · run_cleaning_plan_pipeline ·      │
+│ run_cleaning_executor_pipeline · run_intent_analysis_pipeline │
+│                  │
+│ Agents called directly (Phase 1 production path):            │
 │ ┌──────────┐ ┌──────────┐ ┌─────────────┐ ┌──────────────────┐ │
 │ │ Domain │ │Ingestion │ │Cleaning Plan│ │Cleaning Executor │ │
 │ │ Agent │ │ Agent │ │ Agent  │ │ Agent   │ │
@@ -50,7 +54,8 @@ The backend separates the API gateway from the agent worker so long-running pipe
 │ │ Agent │ │ Agent │ │ Agent │ │ Agent   │ │
 │ └──────────┘ └──────────┘ └─────────────┘ └──────────────────┘ │
 │                  │
-│ HITL Gate Manager (pause/resume at checkpoints #1/#2/#3)   │
+│ HITL gates: HTTP pause/resume via dataset.status + hitl_decisions │
+│ supervisor.py = Phase 2 orchestration scaffold (not invoked) │
 └──────────────────────────────┬──────────────────────────────────────┘
         │
 ┌──────────────────────────────▼──────────────────────────────────────┐
@@ -180,7 +185,7 @@ The backend separates the API gateway from the agent worker so long-running pipe
 |---|---|---|
 | Synchronous (< 300ms p95) | Direct response | auth, dataset list, dashboard fetch, user profile |
 | Async (long-running) | Returns `job_id` immediately; frontend polls `/jobs/{id}` every 2s | upload-trigger, profile-trigger, cleaning-execute, dashboard-generate |
-| HITL-paused | Pipeline pauses in state machine; state persisted to Supabase Database + Supabase Storage; resumes on user decision POST | `/datasets/{id}/merge-plan/decision`, `/datasets/{id}/cleaning-plan/decision` |
+| HITL-paused | Pipeline pauses between `tasks.py` stages; state in Postgres + Supabase Storage; resumes on user decision POST | `/datasets/{id}/merge-plan/decision`, `/datasets/{id}/cleaning-plan/decision` |
 
 ---
 
@@ -188,7 +193,7 @@ The backend separates the API gateway from the agent worker so long-running pipe
 
 | Agent | Scope | Phase | Tools Used |
 |---|---|---|---|
-| Supervisor | Orchestrates pipeline; routes, retries, aggregates; enforces HITL gates | P1 | LangGraph state machine |
+| Supervisor | Orchestrates pipeline; routes, retries, aggregates; enforces HITL gates | P2 (scaffold in `supervisor.py`; Phase 1 uses `tasks.py`) | Graph-based orchestration (Phase 2 planned) |
 | Domain | Loads domain prompt pack; supplies context to all downstream agents | P1 | Prompt pack loader, Supabase Database lookup |
 | Ingestion | Format detection, parsing, profiling, column classification, merge planning | P1 | openpyxl, python-magic, chardet, Python stdlib (csv, json) |
 | Cleaning Plan | Drafts numbered cleaning plan with rationale + confidence — does NOT execute | P1 | LLM via abstraction, Python stdlib profiling |

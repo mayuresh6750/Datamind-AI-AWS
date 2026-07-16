@@ -62,7 +62,7 @@ The platform is built around four core principles:
 | Storage | Supabase Storage (presigned upload URLs) |
 | LLM | Google Gemini 3.5 Flash via LiteLLM-compatible abstraction |
 | Embeddings | Qwen3-Embedding-0.6B (self-hosted, sentence-transformers) |
-| Agent Orchestration | LangGraph (supervisor pattern) |
+| Agent Orchestration | FastAPI BackgroundTasks + `tasks.py` (Phase 1) |
 | Package Manager (Frontend) | pnpm |
 | Package Manager (Backend) | uv |
 

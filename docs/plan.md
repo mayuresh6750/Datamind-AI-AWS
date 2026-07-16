@@ -18,7 +18,7 @@ Deliver a working, end-to-end, multi-file, multi-domain agentic data pipeline wi
 | Authentication | Supabase Auth (email/password, JWT session management, email verification, refresh tokens) |
 | Backend / API Gateway | Python 3.11+, FastAPI, Pydantic v2, Supabase Auth JWT validation, RBAC middleware |
 | Embeddings | Qwen3-Embedding-0.6B (sentence-transformers, self-hosted, 8K context, provider-neutral) |
-| Agent Orchestration | LangGraph (supervisor pattern), Pydantic-validated outputs |
+| Agent Orchestration | FastAPI BackgroundTasks + `tasks.py` (Phase 1) |
 | LLM Provider Layer | LiteLLM-compatible abstraction — Google Gemini 3.5 Flash |
 | Ingestion / Conversion | Apache Arrow, Python stdlib (csv, json), openpyxl |
 | Raw Storage (Layer 1) | Supabase Storage (versioned bucket, per-user prefix) |
@@ -38,7 +38,7 @@ Deliver a working, end-to-end, multi-file, multi-domain agentic data pipeline wi
 DataMind is a three-tier, cloud-native system:
 
 ```
-[User UI / Admin UI] → [FastAPI Gateway] → [LangGraph Agent Pipeline]
+[User UI / Admin UI] → [FastAPI Gateway] → [BackgroundTasks → tasks.py → Agents]
                ↓
        [LiteLLM Abstraction — Google Gemini 3.5 Flash / Google Gemini 3.5 Flash]
                ↓

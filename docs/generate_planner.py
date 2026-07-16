@@ -145,7 +145,7 @@ SPRINTS = [
             ("S3-02","HITL #1 interactions — type-routing override, merge key change, exclude column/file","FE","P1",3,"S3-01"),
             ("S3-03","GET /datasets/{id}/merge-plan — return ingestion profile with schema + merge proposal","BE","P1",2,"S2-05"),
             ("S3-04","POST /datasets/{id}/merge-plan/decision — record decision in hitl_decisions, enqueue next","BE","P1",2,"S3-03"),
-            ("S3-05","LangGraph Supervisor — state machine, step routing, HITL pause/resume, retry on failure","AI","P1",4,"S1-05"),
+            ("S3-05","Pipeline supervisor — state machine, step routing, HITL pause/resume, retry on failure","AI","P1",4,"S1-05"),
             ("S3-06","HITL Gate Manager — pause_pipeline_for_decision(), resume_pipeline_with_decision()","AI","P1",3,"S3-05"),
             ("S3-07","Pipeline state persistence — serialise state to S3 + Postgres after every agent step","BE","P1",3,"S3-05,S1-03"),
             ("S3-08","LLM Provider Abstraction — LiteLLM-compatible, structured_completion(), Pydantic validation, retry (3×)","AI","P1",4,"S1-05"),

@@ -197,7 +197,7 @@ dashboard_generating ──── error (DASHBOARD_*) ────────�
 ready ✓
 ```
 
-- **Paused states** (`awaiting_hitl_*`) persist full LangGraph state to Supabase Database + Supabase Storage. A worker crash does not lose user decisions.
+- **Paused states** (`awaiting_hitl_*`) persist pipeline state (dataset status, HITL decisions, storage URIs) to Supabase Database + Supabase Storage between `tasks.py` stages. A worker crash does not lose user decisions.
 - **Failed state** always produces a partial audit log up to the failure point.
 - **Retry**: failed pipelines are retryable via `POST /jobs/{id}/retry` (3 attempts with exponential backoff: 2s, 8s, 32s).
 

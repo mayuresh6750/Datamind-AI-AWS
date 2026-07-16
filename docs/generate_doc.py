@@ -224,7 +224,7 @@ add_table(
         ['Storage',        'Supabase Storage',                                               'Raw file archive, presigned upload URLs'],
         ['LLM',            'Google Gemini 3.5 Flash (via LiteLLM abstraction)',              'Cleaning plan generation, insights narrative'],
         ['Embeddings',     'Qwen3-Embedding-0.6B',                                          'Free-text column embeddings for pgvector'],
-        ['Agent Framework','LangGraph (supervisor pattern)',                                  'Multi-agent orchestration, retry, HITL gates'],
+        ['Agent Framework','FastAPI BackgroundTasks + tasks.py (Phase 1)',                                  'Multi-agent pipeline, retry, HITL gates'],
         ['Package manager','pnpm (frontend) / uv (backend)',                                  'Dependency management'],
     ]
 )

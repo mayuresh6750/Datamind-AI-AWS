@@ -214,7 +214,7 @@ Team lead scans the thread, flags conflicts, resolves before 10:30 AM.
 |---|---|
 | What a feature should do | Product Lead (PRD owner) |
 | How something is built | The file owner (see planphase.md) |
-| Agent design / LangGraph pipeline | AI/Agent Lead |
+| Agent design / pipeline orchestration (`tasks.py`) | AI/Agent Lead |
 | LLM provider config / cost / model choice | AI/Agent Lead |
 | API design / FastAPI / Pydantic | Backend Lead |
 | Frontend / Next.js / Vega-Lite / shadcn | Frontend Lead |

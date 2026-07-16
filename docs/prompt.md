@@ -823,7 +823,7 @@ git push origin main --force
 #### Backend — Core
 | File | Purpose |
 |------|---------|
-| `backend/pyproject.toml` | All P1 Python dependencies (fastapi, sqlalchemy, langgraph, litellm, sentence-transformers, etc.) |
+| `backend/pyproject.toml` | All P1 Python dependencies (fastapi, sqlalchemy, litellm, sentence-transformers, etc.; langgraph listed for Phase 2 scaffold) |
 | `backend/Dockerfile` | Multi-stage build; libmagic installed for python-magic |
 | `backend/app/core/config.py` | `Settings(BaseSettings)` — all env vars with defaults, `is_production`, `allowed_origins_list` |
 | `backend/app/core/database.py` | SQLAlchemy async engine (asyncpg), `AsyncSessionLocal`, `get_db()`, Supabase client singleton |
@@ -852,7 +852,7 @@ git push origin main --force
 #### Backend — Agents
 | Agent | Role |
 |-------|------|
-| `supervisor.py` | LangGraph state machine — orchestrates the pipeline; HITL pause points |
+| `supervisor.py` | Phase 2 orchestration scaffold (not wired); Phase 1 uses `tasks.py` |
 | `domain.py` | Loads domain prompt pack (6 domains, KPIs, vocab, cleaning/analysis hints) |
 | `ingestion.py` | Format detection, CSV/JSON parsing, column profiling, multi-file merge plan proposal |
 | `cleaning_plan.py` | LLM-generated numbered cleaning plan with heuristic fallback; does NOT execute |

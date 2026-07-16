@@ -6,7 +6,7 @@
 
 ## 1. System Overview
 
-DataMind AI is an agentic data intelligence platform that transforms raw business data into clean, contextual dashboards and actionable business decisions. The system is built around a supervisor‑pattern LangGraph pipeline with four human‑in‑the‑loop (HITL) gates, a LiteLLM‑compatible provider abstraction, and a four‑layer storage architecture.
+DataMind AI is an agentic data intelligence platform that transforms raw business data into clean, contextual dashboards and actionable business decisions. **Phase 1** uses a linear multi-agent pipeline in `backend/app/workers/tasks.py` (FastAPI BackgroundTasks) with four human-in-the-loop (HITL) gates. A `supervisor.py` orchestration scaffold exists for **Phase 2**. The stack includes a LiteLLM-compatible provider abstraction and a four-layer storage architecture.
 
 ---
 
@@ -33,19 +33,14 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
     │
     ▼
  ┌─────────────────────────────────────────────────────────────┐
- │    Agent Orchestration (LangGraph)    │
- │                │
- │ ┌──────────┐ ┌────────┐ ┌─────────────┐    │
- │ │Supervisor│──▶│ Domain │──▶│ Ingestion │    │
- │ │(State │ │ Agent │ │ Agent │    │
- │ │ Machine) │ └────────┘ └──────┬──────┘    │
- │ └──────────┘      │      │
- │  │       ▼      │
- │  │     ┌──────────────┐    │
- │  │     │ HITL #1  │◄── User  │
- │  │     │ (Merge Plan) │    │
- │  │     └──────┬───────┘    │
- │  │       ▼      │
+ │    Agent Pipeline (Phase 1: tasks.py)    │
+ │  BackgroundTasks → run_*_pipeline()      │
+ │  supervisor.py = P2 orchestration scaffold │
+ │       ▼      │
+ │     ┌──────────────┐    │
+ │     │ Ingestion │──▶ HITL #1 (Merge Plan) │
+ │     └──────┬───────┘    │
+ │       ▼      │
  │  │     ┌──────────────┐    │
  │  │     │ Cleaning │    │
  │  │     │ Plan Agent │    │
@@ -136,11 +131,20 @@ DataMind AI is an agentic data intelligence platform that transforms raw busines
 | Admin Router | User management, LLM config, domain packs, system health, audit search |
 | Middleware | JWT validation, RBAC enforcement (user vs admin), rate limiting (100 req/min) |
 
-### 3.3 Agent Pipeline (LangGraph)
+### 3.3 Agent Pipeline (Phase 1: `tasks.py`)
+
+| Stage function | Trigger | Agents invoked |
+|----------------|---------|----------------|
+| `run_ingest_pipeline` | POST `/datasets/{id}/ingest` | IngestionAgent |
+| `run_cleaning_plan_pipeline` | POST merge-plan decision (HITL #1) | CleaningPlanAgent |
+| `run_cleaning_executor_pipeline` | POST cleaning-plan decision (HITL #2) | CleaningExecutorAgent |
+| `run_intent_analysis_pipeline` | POST `/datasets/{id}/intent` | IntentAgent, AnalysisAgent, DashboardAgent, InsightsAgent |
+
+HITL pause/resume is HTTP-driven (`dataset.status` + `hitl_decisions`), not graph checkpointing. See `docs/LangGraph-Orchestration-Analysis.md`.
 
 | Agent | Input | Output | Key Logic |
-|-------|-------|--------|-----------|
-| Supervisor | Pipeline event | Next agent / HITL gate | State machine routing; retry on failure; HITL pause/resume |
+|---|---|---|---|
+| Supervisor | Pipeline event | Next agent / HITL gate | **Phase 2 only** — `supervisor.py` scaffold, not invoked in Phase 1 |
 | Domain | User domain | Prompt pack context | Loads domain vocabulary + KPIs from Supabase Database |
 | Ingestion | File list | Schema profile + merge plan | Format detection, parsing, profiling, column classification |
 | Cleaning Plan | Schema profile + domain context | Numbered cleaning plan | Dedup detection, imputation proposals, type coercion, outlier flagging, confidence scoring |
