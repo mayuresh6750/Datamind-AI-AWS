@@ -3,7 +3,6 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
-import { supabase } from '@/lib/supabase'
 import { BarChart2, Loader2 } from 'lucide-react'
 
 function extractLoginError(err: unknown): string {
@@ -38,10 +37,10 @@ export default function LoginPage() {
 
       if (!res.ok) { setErr(body.detail ?? 'Invalid credentials'); return }
 
-      await supabase.auth.setSession({
-        access_token:  body.access_token,
-        refresh_token: body.refresh_token,
-      }).catch(() => {})
+      if (typeof document !== 'undefined') {
+        document.cookie = `datamind_token=${body.access_token}; path=/; max-age=604800; SameSite=Lax`
+        document.cookie = `datamind_role=${body.role ?? 'user'}; path=/; max-age=604800; SameSite=Lax`
+      }
 
       setAuth({
         token:        body.access_token  ?? null,

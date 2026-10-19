@@ -2,14 +2,21 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
-from supabase import Client, create_client
 
 from app.core.config import settings
 
 # ─── SQLAlchemy async engine ──────────────────────────────────────────────────
 import ssl as _ssl
 
-_db_url = settings.database_url.split("?")[0]  # strip ?ssl=require from URL
+_raw_url = settings.database_url
+if not _raw_url:
+    try:
+        from app.core.secrets import build_database_url
+        _raw_url = build_database_url(sync=False)
+    except Exception:
+        _raw_url = "postgresql+asyncpg://localhost/postgres"
+
+_db_url = _raw_url.split("?")[0]  # strip ?ssl=require from URL
 
 _ssl_ctx = _ssl.create_default_context()
 _ssl_ctx.check_hostname = False
@@ -40,9 +47,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
-# ─── Supabase client (service role — server-side only) ───────────────────────
-def get_supabase() -> Client:
-    return create_client(
-        settings.supabase_url,
-        settings.supabase_service_role_key,
-    )
+# ─── Legacy client stub (Supabase fully deprecated in favor of AWS) ──────────
+def get_supabase():
+    return None

@@ -395,20 +395,24 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
             try:
                 async with await db.begin_nested():
                     if sql_cols and cleaned_rows:
-                        col_defs = ", ".join(f'"{c}" TEXT' for c in sql_cols)
+                        all_sql_cols = ["_row_id"] + [c for c in sql_cols if c != "_row_id"]
+                        col_defs = ", ".join(f'"{c}" TEXT' for c in all_sql_cols)
                         await db.execute(text(f'CREATE TABLE IF NOT EXISTS "{table_name}" ({col_defs})'))
                         # SQLAlchemy bind parameters must not contain spaces or special chars.
                         # Map each column to a safe param name (spaces/hyphens → underscore).
                         import re as _re
-                        safe_param = {c: _re.sub(r'[^a-zA-Z0-9_]', '_', c) for c in sql_cols}
-                        col_names = ", ".join(f'"{c}"' for c in sql_cols)
-                        placeholders = ", ".join(f":{safe_param[c]}" for c in sql_cols)
+                        safe_param = {c: _re.sub(r'[^a-zA-Z0-9_]', '_', c) for c in all_sql_cols}
+                        col_names = ", ".join(f'"{c}"' for c in all_sql_cols)
+                        placeholders = ", ".join(f":{safe_param[c]}" for c in all_sql_cols)
                         insert_sql = text(f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})')
                         # Chunk to stay under asyncpg's 32 767-parameter limit.
                         for i in range(0, len(cleaned_rows), _INSERT_CHUNK):
                             chunk_vals = [
-                                {safe_param[c]: str(row.get(c, "")) for c in sql_cols}
-                                for row in cleaned_rows[i:i + _INSERT_CHUNK]
+                                {
+                                    "_row_id": str(i + idx + 1),
+                                    **{safe_param[c]: str(row.get(c, "")) for c in sql_cols if c != "_row_id"}
+                                }
+                                for idx, row in enumerate(cleaned_rows[i:i + _INSERT_CHUNK])
                             ]
                             await db.execute(insert_sql, chunk_vals)
             except Exception as pg_exc:
@@ -451,15 +455,21 @@ async def run_cleaning_executor_pipeline(dataset_id: str, cleaning_decision: dic
                             chunk_embeddings = await loop.run_in_executor(
                                 None, embedding_model.embed_batch, chunk_texts
                             )
-                            emb_params = [
-                                {
+                            emb_params = []
+                            for idx, (text_val, emb, row) in enumerate(zip(chunk_texts, chunk_embeddings, chunk_rows)):
+                                meta_dict = {"_row_id": str(i + idx + 1)}
+                                for k, v in row.items():
+                                    if k.lower() == "id" or k.lower().endswith("_id"):
+                                        meta_dict[k] = v
+                                for k in list(row.keys())[:5]:
+                                    if k not in meta_dict:
+                                        meta_dict[k] = row.get(k)
+                                emb_params.append({
                                     "did": dataset_id,
                                     "content": text_val,
-                                    "meta": json.dumps({k: row.get(k) for k in list(row.keys())[:5]}),
+                                    "meta": json.dumps(meta_dict),
                                     "emb": "[" + ",".join(str(x) for x in emb) + "]",
-                                }
-                                for text_val, emb, row in zip(chunk_texts, chunk_embeddings, chunk_rows)
-                            ]
+                                })
                             await db.execute(insert_emb, emb_params)
                             done = i + len(chunk_rows)
                             pct = 85 + int(14 * done / max(total, 1))
@@ -585,8 +595,72 @@ async def run_intent_analysis_pipeline(dataset_id: str, question: str, user_id: 
 
             analysis_agent = AnalysisAgent(llm=llm_client)
             table_name = f"ds_{dataset_id.replace('-', '_')}"
-            numeric_results = await analysis_agent.run_numeric(spec, table_name, db, domain)
-            textual_results = await analysis_agent.run_textual(question, dataset_id, db)
+
+            # Step 3: Two-Stage Hybrid Query Execution
+            textual_cols = [p.name for p in profiles if p.classification == "textual"]
+            is_hybrid = bool(getattr(spec, "semantic_filter_concept", None)) and bool(textual_cols)
+
+            if is_hybrid:
+                log.info(
+                    "two_stage_hybrid_query_start",
+                    concept=spec.semantic_filter_concept,
+                    dataset_id=dataset_id,
+                )
+                # Discover candidate ID column from profiles
+                candidate_id_col = None
+                for col in ("_row_id", "id", "ID", "Id"):
+                    if any(p.name == col for p in profiles):
+                        candidate_id_col = col
+                        break
+                if not candidate_id_col:
+                    for p in profiles:
+                        if p.name.lower().endswith(("_id", "id")) and len(p.name) > 2:
+                            candidate_id_col = p.name
+                            break
+                if not candidate_id_col:
+                    candidate_id_col = "_row_id"
+
+                # Stage 1: Vector Semantic Filter -> retrieve matching row IDs
+                matching_ids = await analysis_agent.retrieve_semantic_row_ids(
+                    concept=spec.semantic_filter_concept,
+                    dataset_id=dataset_id,
+                    db=db,
+                    threshold=0.70,
+                    limit=500,
+                    id_column=candidate_id_col,
+                )
+
+                # Stage 2: Inject ID filter into spec.filters
+                if matching_ids:
+                    id_filter = {"col": candidate_id_col, "op": "IN", "val": matching_ids[:500]}
+                    if spec.filters is None:
+                        spec.filters = [id_filter]
+                    else:
+                        spec.filters.append(id_filter)
+                    log.info(
+                        "two_stage_hybrid_filter_injected",
+                        id_col=candidate_id_col,
+                        id_count=len(matching_ids),
+                    )
+                else:
+                    log.warning(
+                        "two_stage_hybrid_zero_semantic_matches",
+                        concept=spec.semantic_filter_concept,
+                        dataset_id=dataset_id,
+                    )
+                    id_filter = {"col": candidate_id_col, "op": "IN", "val": []}
+                    if spec.filters is None:
+                        spec.filters = [id_filter]
+                    else:
+                        spec.filters.append(id_filter)
+
+                numeric_results = await analysis_agent.run_numeric(spec, table_name, db, domain)
+                # Textual search context for grounding
+                textual_results = await analysis_agent.run_textual(spec.semantic_filter_concept or question, dataset_id, db)
+            else:
+                numeric_results = await analysis_agent.run_numeric(spec, table_name, db, domain)
+                textual_results = await analysis_agent.run_textual(question, dataset_id, db)
+
             # Ensure the transaction is clean before committing pipeline_runs.
             # run_numeric / run_textual use savepoints internally, but asyncpg can
             # still leave the session in a bad state if the savepoint itself failed
@@ -602,7 +676,11 @@ async def run_intent_analysis_pipeline(dataset_id: str, question: str, user_id: 
 
             update_job(job_id, "running", progress_pct=90, current_step="generating_insights")
             insights_agent = InsightsAgent(llm=llm_client)
-            final_dashboard = await insights_agent.enrich(dashboard, domain)
+            final_dashboard = await insights_agent.enrich(
+                dashboard,
+                domain,
+                semantic_concept=getattr(spec, "semantic_filter_concept", None),
+            )
 
             from app.api.v1.dashboards import cache_dashboard
             cache_dashboard(dataset_id, final_dashboard)

@@ -1,100 +1,131 @@
-"""Auth endpoints — signup, login, refresh, logout via Supabase Auth."""
+"""Auth endpoints — signup, login, refresh, logout via Native RDS & JWT."""
 import uuid
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_supabase, get_db
+from app.core.database import get_db
+from app.core.security import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+)
+from app.models.db import User, Tenant
 from app.models.schemas import AuthResponse, LoginRequest, SignUpRequest
 
 log = structlog.get_logger()
 router = APIRouter()
 
 
-async def _get_active_domain(user_id: str, db: AsyncSession) -> str | None:
-    """Fetch the user's active_domain from the users table — non-fatal."""
-    try:
-        from app.models.db import User
-        result = await db.execute(select(User).where(User.user_id == uuid.UUID(user_id)))
-        user = result.scalar_one_or_none()
-        return user.active_domain if user else None
-    except Exception:
-        return None
+async def _get_or_create_default_tenant(db: AsyncSession) -> Tenant:
+    """Ensure at least one tenant exists for users."""
+    res = await db.execute(select(Tenant).limit(1))
+    tenant = res.scalar_one_or_none()
+    if tenant is None:
+        tenant = Tenant(name="Default Tenant")
+        db.add(tenant)
+        await db.commit()
+        await db.refresh(tenant)
+    return tenant
 
 
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-async def signup(body: SignUpRequest):
-    supabase = get_supabase()
-    try:
-        res = supabase.auth.sign_up({"email": body.email, "password": body.password})
-    except Exception as exc:
-        log.warning("signup_failed", email=body.email, error=str(exc))
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-
-    if res.user is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Signup failed — check email/password.")
-
-    if res.session is None:
+async def signup(body: SignUpRequest, db: AsyncSession = Depends(get_db)):
+    # Check if user already exists
+    res = await db.execute(select(User).where(User.email == body.email))
+    existing_user = res.scalar_one_or_none()
+    if existing_user is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User already registered. Please use the login endpoint instead.",
         )
 
+    tenant = await _get_or_create_default_tenant(db)
+    pwd_hash = hash_password(body.password)
+
+    new_user = User(
+        tenant_id=tenant.tenant_id,
+        email=body.email,
+        hashed_password=pwd_hash,
+        role="user",
+        active_domain="other",
+    )
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+
+    user_id_str = str(new_user.user_id)
+    token_payload = {"sub": user_id_str, "email": new_user.email, "role": new_user.role}
+
     return AuthResponse(
-        access_token=res.session.access_token,
-        refresh_token=res.session.refresh_token,
-        user_id=str(res.user.id),
-        role=(res.user.user_metadata or {}).get("role", "user"),
+        access_token=create_access_token(token_payload),
+        refresh_token=create_refresh_token(token_payload),
+        user_id=user_id_str,
+        role=new_user.role,
+        active_domain=new_user.active_domain,
     )
 
 
 @router.post("/login", response_model=AuthResponse)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    supabase = get_supabase()
-    try:
-        res = supabase.auth.sign_in_with_password({"email": body.email, "password": body.password})
-    except Exception as exc:
-        log.warning("login_failed", error=str(exc))
+    res = await db.execute(select(User).where(User.email == body.email))
+    user = res.scalar_one_or_none()
+
+    if user is None or not user.hashed_password:
+        log.warning("login_failed_user_not_found", email=body.email)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
-    if res.session is None:
+    if not verify_password(body.password, user.hashed_password):
+        log.warning("login_failed_password_mismatch", email=body.email)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
-    role = (res.user.user_metadata or {}).get("role", "user") if res.user else "user"
-    user_id = str(res.user.id)
-    active_domain = await _get_active_domain(user_id, db)
+    user_id_str = str(user.user_id)
+    token_payload = {"sub": user_id_str, "email": user.email, "role": user.role}
 
     return AuthResponse(
-        access_token=res.session.access_token,
-        refresh_token=res.session.refresh_token,
-        user_id=user_id,
-        role=role,
-        active_domain=active_domain,
+        access_token=create_access_token(token_payload),
+        refresh_token=create_refresh_token(token_payload),
+        user_id=user_id_str,
+        role=user.role,
+        active_domain=user.active_domain,
     )
 
 
 @router.post("/refresh", response_model=AuthResponse)
-async def refresh(refresh_token: str):
-    supabase = get_supabase()
+async def refresh(refresh_token: str, db: AsyncSession = Depends(get_db)):
     try:
-        res = supabase.auth.refresh_session(refresh_token)
+        payload = decode_token(refresh_token)
+        if payload.get("type") != "refresh":
+            raise ValueError("Not a refresh token")
+        user_id_str = payload.get("sub")
+        if not user_id_str:
+            raise ValueError("Missing subject")
     except Exception:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token.",
+        )
 
-    role = (res.user.user_metadata or {}).get("role", "user") if res.user else "user"
+    res = await db.execute(select(User).where(User.user_id == uuid.UUID(user_id_str)))
+    user = res.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found.")
+
+    token_payload = {"sub": str(user.user_id), "email": user.email, "role": user.role}
+
     return AuthResponse(
-        access_token=res.session.access_token,
-        refresh_token=res.session.refresh_token,
-        user_id=str(res.user.id),
-        role=role,
+        access_token=create_access_token(token_payload),
+        refresh_token=create_refresh_token(token_payload),
+        user_id=str(user.user_id),
+        role=user.role,
+        active_domain=user.active_domain,
     )
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(access_token: str):
-    supabase = get_supabase()
-    try:
-        supabase.auth.sign_out()
-    except Exception:
-        pass  # best-effort logout
+    # Stateless JWT logout
+    return None

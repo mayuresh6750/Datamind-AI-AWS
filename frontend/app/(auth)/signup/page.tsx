@@ -2,11 +2,12 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/authStore'
 import { BarChart2, Loader2 } from 'lucide-react'
 
 export default function SignupPage() {
   const router = useRouter()
+  const setAuth = useAuthStore.getState().setAuth
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
   const [err, setErr]           = useState('')
@@ -18,8 +19,31 @@ export default function SignupPage() {
     setLoading(true)
     setErr('')
     try {
-      const { error } = await supabase.auth.signUp({ email, password })
-      if (error) { setErr(error.message); return }
+      const res = await fetch('/api/v1/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+      const body = await res.json()
+      if (!res.ok) {
+        setErr(body.detail || 'Sign up failed. Please try again.')
+        return
+      }
+
+      setAuth({
+        token: body.access_token ?? null,
+        refreshToken: body.refresh_token ?? null,
+        userId: body.user_id ?? null,
+        role: body.role ?? 'user',
+        email,
+        activeDomain: null,
+      })
+
+      if (typeof document !== 'undefined') {
+        document.cookie = `datamind_token=${body.access_token}; path=/; max-age=604800; SameSite=Lax`
+        document.cookie = `datamind_role=${body.role ?? 'user'}; path=/; max-age=604800; SameSite=Lax`
+      }
+
       router.push('/domain')
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Sign up failed. Please try again.')

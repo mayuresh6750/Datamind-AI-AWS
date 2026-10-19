@@ -1,14 +1,11 @@
 /**
  * uploadToStorage.ts
  *
- * Handles direct browser → Supabase Storage uploads via presigned PUT URLs.
- *
- * Supabase Storage signed upload URL format (from create_signed_upload_url):
- *   PUT https://<project>.supabase.co/storage/v1/object/upload/sign/<bucket>/<path>?token=<jwt>
+ * Handles direct browser -> AWS S3 Storage uploads via presigned PUT URLs.
+ * S3 presigned PUT URL format:
+ *   PUT https://<bucket>.s3.<region>.amazonaws.com/<key>?AWSAccessKeyId=...&Signature=...
  *   Content-Type: <file MIME type>
  *   Body: raw file bytes
- *
- * No Authorization header is needed — the JWT token is embedded in the URL.
  */
 
 export interface UploadProgress {

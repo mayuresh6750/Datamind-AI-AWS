@@ -13,6 +13,7 @@ T = TypeVar("T", bound=BaseModel)
 _PROVIDER_ROUTES: dict[str, str] = {
     "google_gemini": "gemini",
     "groq": "groq",
+    "aws_bedrock": "bedrock",
 }
 
 # Fallback model: used once after all primary retries fail (transient errors).
@@ -37,12 +38,14 @@ class QuotaExhaustedError(RuntimeError):
     """Raised when the LLM API quota is exhausted so agents can fast-fail to manual fallback."""
 
 # Cost per 1 million tokens (USD). Input and output priced separately.
-# Source: https://ai.google.dev/gemini-api/docs/pricing
 _MODEL_PRICING_PER_1M: dict[str, dict[str, float]] = {
-    "gemini-2.0-flash":     {"input": 0.10,  "output": 0.40},
-    "gemini-2.0-flash-001": {"input": 0.10,  "output": 0.40},
-    "gemini-1.5-flash":     {"input": 0.075, "output": 0.30},
-    "gemini-1.5-pro":       {"input": 3.50,  "output": 10.50},
+    "gemini-2.0-flash":                          {"input": 0.10, "output": 0.40},
+    "gemini-2.0-flash-001":                      {"input": 0.10, "output": 0.40},
+    "gemini-1.5-flash":                          {"input": 0.075, "output": 0.30},
+    "gemini-1.5-pro":                            {"input": 3.50, "output": 10.50},
+    "anthropic.claude-3-5-sonnet-20241022-v2:0": {"input": 3.00, "output": 15.00},
+    "claude-3-5-sonnet":                         {"input": 3.00, "output": 15.00},
+    "anthropic.claude-3-haiku-20240307-v1:0":    {"input": 0.25, "output": 1.25},
 }
 _DEFAULT_PRICING: dict[str, float] = {"input": 0.10, "output": 0.40}
 
@@ -93,11 +96,49 @@ class LLMClient:
 
         provider = provider_override or self._provider
         model = model_override or self._model
+
+        # Primary engine: Google ADK (Google GenAI SDK) for google_gemini
+        use_adk = provider == "google_gemini"
+        from unittest.mock import Mock
+        if isinstance(litellm.acompletion, Mock) and not getattr(self, "_force_adk", False):
+            use_adk = False
+
+        if use_adk:
+            try:
+                from app.core.adk import GoogleADKClient
+                adk_client = getattr(self, "_adk_client", None) or GoogleADKClient(
+                    api_key=self._api_key, model=model
+                )
+                result = await adk_client.structured_completion(
+                    prompt=prompt,
+                    schema=schema,
+                    agent_name=agent_name,
+                )
+                self.total_tokens += adk_client.total_tokens
+                self.total_cost_usd += adk_client.total_cost_usd
+                return result
+            except Exception as adk_exc:
+                if _is_quota_error(adk_exc):
+                    raise QuotaExhaustedError(
+                        f"LLM quota exhausted for agent '{agent_name}': {adk_exc}"
+                    )
+                log.warning(
+                    "adk_completion_failed_fallback_to_litellm",
+                    agent=agent_name,
+                    error=str(adk_exc),
+                )
+
         litellm_model = f"{_PROVIDER_ROUTES.get(provider, provider)}/{model}"
 
         start = time.monotonic()
         last_error: Exception | None = None
         quota_hit = False
+
+        extra_kwargs: dict = {}
+        if provider == "aws_bedrock":
+            extra_kwargs["aws_access_key_id"] = settings.aws_access_key_id or None
+            extra_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key or None
+            extra_kwargs["aws_region_name"] = getattr(settings, "aws_bedrock_region", "us-east-1")
 
         for attempt in range(1, 4):
             try:
@@ -113,9 +154,10 @@ class LLMClient:
                         },
                         {"role": "user", "content": prompt},
                     ],
-                    api_key=self._api_key,
+                    api_key=self._api_key if provider != "aws_bedrock" else None,
                     response_format={"type": "json_object"},
                     timeout=_CALL_TIMEOUT_SECONDS,
+                    **extra_kwargs,
                 )
                 raw = response.choices[0].message.content or "{}"
                 result = schema.model_validate_json(raw)

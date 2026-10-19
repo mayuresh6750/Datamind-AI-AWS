@@ -144,6 +144,19 @@ class AnalysisSpec(BaseModel):
     suggested_chart_types: list[str]
     restatement: str
     confidence: float
+    semantic_filter_concept: Optional[str] = None
+
+
+class AnalysisResult(BaseModel):
+    summary: str
+    rows: list[dict] = []
+    sql_query: Optional[str] = None
+    semantic_matches: Optional[list[str]] = None
+    confidence: float = 1.0
+
+    @property
+    def numeric_results(self) -> list[dict]:
+        return self.rows
 
 
 # ─── Dashboard ────────────────────────────────────────────────────────────────

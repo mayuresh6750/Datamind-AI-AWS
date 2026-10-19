@@ -33,10 +33,10 @@ class User(Base):
         ),
     )
 
-    # References Supabase Auth auth.users(id) — password managed by Supabase Auth
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.tenant_id"), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
     active_domain: Mapped[str] = mapped_column(String(20), nullable=False, default="other")
     other_domain_descriptor: Mapped[str | None] = mapped_column(String(255))

@@ -1,85 +1,113 @@
 # DataMind AI
 
-**An Agentic Platform for End-to-End Business Data Intelligence**
+**An Autonomous Agentic Platform for End-to-End Business Data Intelligence**
 
-From raw data → cleaned data → context-aware dashboards → business decisions.
+From raw data → cleaned data → context-aware dashboards → actionable business decisions.
 
-DataMind AI is an agentic data intelligence platform that takes a business user from raw, messy files to a clean, contextual dashboard — and a recommended business decision — without writing a line of SQL or Python.
+DataMind AI is an enterprise-grade agentic data intelligence platform that guides business users from raw, heterogeneous data files to production-ready dashboards and decision narratives without writing a single line of SQL or Python.
+
+---
+
+## Pure AWS Cloud Architecture
+
+DataMind AI is built natively on a **100% AWS Cloud Architecture**, replacing legacy third-party Backend-as-a-Service (BaaS) dependencies with managed AWS infrastructure under IAM governance, KMS encryption, and automated CI/CD.
+
+```
+                  ┌────────────────────────────────────────┐
+                  │          Next.js Frontend UI           │
+                  └──────────────────┬─────────────────────┘
+                                     │ (REST / Native JWT)
+                                     ▼
+                  ┌────────────────────────────────────────┐
+                  │       DataMind AI FastAPI Backend      │
+                  └───────┬──────────┬──────────┬──────────┘
+                          │          │          │
+         ┌────────────────┘          │          └────────────────┐
+         ▼                           ▼                           ▼
+┌──────────────────┐       ┌──────────────────┐       ┌──────────────────┐
+│    Amazon S3     │       │    Amazon RDS    │       │   AWS Secrets    │
+│ (Raw & Curated   │       │  PostgreSQL 18.3 │       │     Manager      │
+│  Object Storage) │       │   + pgvector     │       │ (Dynamic Master  │
+│  Presigned URLs  │       │   Native Auth    │       │   Credentials)   │
+└──────────────────┘       └──────────────────┘       └──────────────────┘
+                                     ▲
+                                     │ (Embeddings / Inference)
+                           ┌──────────────────┐
+                           │  Amazon Bedrock  │
+                           │ Claude 3.5 &     │
+                           │ Titan Embed v2   │
+                           └──────────────────┘
+```
 
 ---
 
 ## Core Principles
 
-1. **Domain-first approach** — Ask users their domain so all agents apply domain-appropriate vocabulary, KPIs, and validation rules
-2. **User-controlled data modeling** — Accept multiple files (CSV, XLSX, JSON, Parquet) and let users decide how to merge/model them
-3. **Human-in-the-loop (HITL) cleaning** — Every cleaning step is proposed as a plan; users approve/modify/reject before execution
-4. **Type-aware storage routing** — Numeric/structured data → relational stores; free-text → vector stores
+1. **Domain-First Intelligence** — Captures user domain (*Finance, Healthcare, Retail, Marketing, Operations*) so all autonomous agents apply domain-specific KPIs, vocabulary, and statistical rules.
+2. **User-Controlled Data Modeling** — Ingests heterogeneous files (CSV, XLSX, JSON, Parquet) with intelligent schema reconciliation and user-governed merge strategies.
+3. **Human-in-the-Loop (HITL) Governance** — AI agents propose numbered, deterministic data cleaning transformations; humans approve, modify, or reject each step before execution.
+4. **Type-Aware Storage Routing** — Relational and structured business records route to PostgreSQL; semantic textual concept embeddings route to `pgvector`.
+5. **Zero-Trust Credential Security** — Master database passwords and secrets are never committed or hardcoded; dynamic resolution via AWS Secrets Manager with client-side TTL caching.
 
 ---
 
 ## Technology Stack
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | Next.js 14, TypeScript, Tailwind CSS, shadcn/ui, Recharts |
-| Authentication | Supabase Auth (email/password, JWT session management, email verification, refresh tokens) |
-| Backend | Python 3.11+, FastAPI, Pydantic v2, FastAPI BackgroundTasks |
-| Agent Orchestration | **Phase 1 (actual):** `backend/app/workers/tasks.py` + FastAPI BackgroundTasks. **Phase 2 (planned):** graph orchestration in `supervisor.py` |
-| LLM Provider | LiteLLM abstraction; Google Gemini 3.5 Flash (Phase 1) |
-| Embeddings | Qwen3-Embedding-0.6B (sentence-transformers, self-hosted, 8K context, provider-neutral) |
-| Layer 1 — Raw Storage | Supabase Storage (versioned, per-user prefix) |
-| Layer 2 — Curated Storage | Supabase Storage, JSON |
-| Layer 3 — Numeric/Structured | Supabase Database (PostgreSQL) + PostgreSQL |
-| Layer 4 — Textual/Semantic | Supabase Vector (pgvector, HNSW index) + Qwen3-Embedding-0.6B |
-| Secrets | Supabase Vault |
-| Observability | Prometheus + Grafana |
-| CI/CD | GitHub Actions |
-| IaC | Terraform |
+| Layer | Service / Technology | Architecture Role |
+|-------|----------------------|-------------------|
+| **Frontend** | Next.js 14, TypeScript, Tailwind CSS, shadcn/ui | Reactive multi-agent dashboard & HITL checkpoint UI |
+| **Authentication** | Native HS256 JWT + PBKDF2-HMAC-SHA256 | Self-hosted stateless authentication in Amazon RDS `users` table |
+| **Backend** | Python 3.11+, FastAPI, SQLAlchemy (Async), Alembic | High-throughput async REST API & background task execution |
+| **Object Storage (L1 & L2)** | **Amazon S3** (`boto3`, non-blocking I/O) | Raw uploaded files & curated JSON artifacts with Pre-Signed URLs |
+| **Relational Database (L3)** | **Amazon RDS PostgreSQL 18.3** (`db.t4g.micro`) | Relational metadata, tenants, users, datasets, and audit trails |
+| **Vector Storage (L4)** | **Amazon RDS `pgvector`** (HNSW / IVFFlat) | High-dimensional embedding storage & cosine similarity search (`<->`) |
+| **Foundation Models (LLM)** | **Amazon Bedrock** (Anthropic Claude 3.5 Sonnet / Haiku) | Code generation, schema cleaning, SQL generation, and chart synthesis |
+| **Embedding Model** | **Amazon Titan Embeddings v2** (`amazon.titan-embed-text-v2:0`) | 1024-dimensional normalized vector embeddings via AWS Bedrock Runtime |
+| **Secrets Management** | **AWS Secrets Manager** (KMS encrypted) | Dynamic master credential rotation and zero plaintext passwords |
+| **Observability** | Structlog, Prometheus, Grafana | Structured JSON logging, LLM token cost tracking, and pipeline latency |
 
 ---
 
-## Architecture
+## Four-Layer Storage Engine
 
-### Four-Layer Storage
+| Storage Layer | Data Stored | AWS Service | Access Pattern |
+|---|---|---|---|
+| **Layer 1: Raw Ingestion** | Original files (CSV, XLSX, JSON, Parquet) | **Amazon S3** | Immutable upload; signed URL client offloading |
+| **Layer 2: Curated Artifacts** | Cleaned JSON matrices & cleaning plans | **Amazon S3** | Versioned object storage |
+| **Layer 3: Relational / Structured** | Numeric metrics, categorical, timestamps | **Amazon RDS PostgreSQL** | ACID transactions, SQL analytical queries |
+| **Layer 4: Semantic / Vector** | Column descriptions & data catalog vectors | **Amazon RDS `pgvector`** | Vector cosine / Euclidean similarity search |
 
-| Layer | Content | Engine |
-|-------|---------|--------|
-| Layer 1 | Original files (immutable) | Supabase Storage |
-| Layer 2 | Cleaned JSON (archive originals) | Supabase Storage + PostgreSQL |
-| Layer 3 | Numeric, boolean, date, categorical | PostgreSQL |
-| Layer 4 | Free-text embeddings (Qwen3-Embedding-0.6B) | Supabase Vector (pgvector) |
+---
 
-### Agent System (Phase 1)
+## Multi-Agent Pipeline
 
-| Agent | Role |
-|-------|------|
-| Supervisor | Orchestrates pipeline (Phase 2); Phase 1 uses `tasks.py` functions per stage |
-| Domain | Loads domain prompt pack (vocabulary, KPIs, validation rules) |
-| Ingestion | Detects format, parses, profiles, classifies columns, drafts merge plan |
-| Cleaning Plan | Drafts numbered cleaning plan with rationale + confidence. Does NOT execute. |
-| Cleaning Executor | Executes only user-approved steps, logs each action |
-| Intent | Parses natural-language goal into structured analysis spec |
-| Analysis | Runs SQL on numeric data (PostgreSQL/Postgres); semantic search on text (Supabase Vector (pgvector)) |
-| Dashboard | Converts analysis results into Vega-Lite specs (KPI cards + charts) |
-| Insights | Generates domain-flavored narrative + recommended next action |
+| Agent | Responsibility |
+|---|---|
+| **Supervisor** | Orchestrates stage transitions across background execution workers. |
+| **Domain Agent** | Injects domain-specific prompts (financial metrics, healthcare ICD-10, retail AOV). |
+| **Ingestion Agent** | Sniffs encoding/delimiters, profiles column types, detects schema conflicts. |
+| **Cleaning Plan Agent** | Drafts numbered cleaning transformations with confidence scores and rationale. Does *not* execute. |
+| **Cleaning Executor** | Executes *only* human-approved steps; writes before/after diffs to `audit_log`. |
+| **Intent Agent** | Parses natural-language questions into structured analysis specifications. |
+| **Analysis Agent** | Runs hybrid queries (numeric SQL joins on RDS + semantic search on `pgvector`). |
+| **Dashboard Agent** | Generates declarative Vega-Lite visualization specifications for interactive charts. |
+| **Insights Agent** | Produces contextual narratives with recommended strategic business decisions. |
 
-### Data Flow
+---
+
+## HITL (Human-in-the-Loop) Governance Checkpoints
 
 ```
-Domain Selection → Upload → Detect & Profile → HITL #1 (Schema & Merge)
-→ Cleaning Plan → HITL #2 (Plan Approval) → Execute & Route
-→ Intent Capture → HITL #3 (Intent Confirmation)
+Domain Selection → Upload → Detect & Profile → [HITL #1: Schema & Merge]
+→ Cleaning Plan → [HITL #2: Cleaning Plan Approval] → Execute & Route
+→ Intent Capture → [HITL #3: Intent Confirmation]
 → Analyze → Dashboard → Insights
 ```
 
-### HITL Checkpoints
-
-| # | Gate | User Action |
-|---|------|-------------|
-| 1 | Schema & Merge Validation | Approve/change merge key, type-routing, exclude columns/files |
-| 2 | Cleaning Plan Approval | Approve/modify/reject each cleaning step |
-| 3 | Intent Confirmation | Confirm or refine the agent's restated interpretation |
-| 4 | Dashboard Accept/Refine (P2) | Accept, request changes, or ask follow-up |
+1. **Checkpoint 1 (Schema & Merge):** User confirms or overrides merge strategy (*join, union, separate*), join keys, and column exclusions.
+2. **Checkpoint 2 (Cleaning Plan Approval):** User approves, edits, or discards individual AI cleaning steps (*impute missing, trim whitespace, normalize dates*).
+3. **Checkpoint 3 (Intent Confirmation):** User refines the AI's restated analytical goal before code execution.
+4. **Checkpoint 4 (Dashboard Accept/Refine):** User accepts charts or triggers conversational follow-up iterations.
 
 ---
 
@@ -87,100 +115,66 @@ Domain Selection → Upload → Detect & Profile → HITL #1 (Schema & Merge)
 
 ```
 DataMind-AI/
-├── backend/    # FastAPI application
-│ ├── app/
-│ │ ├── agents/  # Agent modules (supervisor.py = Phase 2 scaffold; production uses tasks.py)
-│ │ ├── api/v1/  # API endpoints (auth, datasets, dashboards, etc.)
-│ │ ├── core/   # Config, database, security, storage
-│ │ ├── models/  # Pydantic/SQLAlchemy models
-│ │ └── workers/tasks.py  # Phase 1 pipeline orchestration (BackgroundTasks entry point)
-│ ├── tests/   # Unit, integration, E2E tests
-├── frontend/    # Next.js 14 application
-│ ├── app/    # Routes (/app/* user UI, /admin/* admin UI)
-│ ├── components/  # Reusable UI components
-│ └── lib/    # API client, hooks, types
-├── infra/    # Terraform infrastructure
-│ └── terraform/
-├── docs/     # Documentation
-│ ├── PRD.md   # Product Requirements Document
-│ ├── architecture.md # Architecture overview
-│ ├── prompt.md   # Session prompt log
-│ └── ...
-├── claude.md    # Developer reference (API, security, testing, UI/UX)
-├── skills.md    # AI skill patterns
-└── README.md    # This file
+├── backend/
+│   ├── alembic/              # Database schema migrations
+│   ├── app/
+│   │   ├── agents/           # Autonomous agent implementations
+│   │   ├── api/v1/           # FastAPI endpoints (auth, datasets, jobs, admin)
+│   │   ├── core/
+│   │   │   ├── config.py     # Pydantic environment configuration
+│   │   │   ├── database.py   # Async SQLAlchemy engine for Amazon RDS
+│   │   │   ├── s3.py         # Threadpool-backed non-blocking Amazon S3 service
+│   │   │   ├── secrets.py    # AWS Secrets Manager dynamic credential caching
+│   │   │   ├── security.py   # Native HS256 JWT auth & PBKDF2 password hashing
+│   │   │   ├── embeddings.py # Amazon Titan Embeddings v2 runtime
+│   │   │   └── llm.py        # Amazon Bedrock & LiteLLM provider gateway
+│   │   ├── models/           # SQLAlchemy ORM & Pydantic v2 schemas
+│   │   └── workers/tasks.py  # BackgroundTasks multi-stage pipeline worker
+│   └── tests/                # Automated pytest unit & integration test suite
+├── frontend/
+│   ├── app/                  # Next.js App Router (/app/* workspace, /admin/*)
+│   ├── components/           # shadcn/ui & Recharts dashboard components
+│   └── lib/                  # REST API client & state management hooks
+├── infra/                    # Terraform / AWS Infrastructure as Code
+└── README.md                 # Project Documentation
 ```
 
 ---
 
-## Phase 1 Timeline
-
-| Week | Dates | Focus | Exit Criteria |
-|------|-------|-------|---------------|
-| 1 | May 6–9 | Foundation | Supabase Auth configured, user can sign up/log in, hit /health. CI/CD deploys to staging. |
-| 2 | May 12–16 | Domain + Ingestion | Domain persists. Multi-file upload works. HITL #1 renders. |
-| 3 | May 19–23 | Cleaning + LLM | Cleaning plan generated. ≥60% acceptance on golden datasets 1–5. |
-| 4 | May 26–30 | Analysis + Dashboard | E2E happy path for CSV and Parquet merge. |
-| 5 | Jun 2–6 | Admin UI + QA + Hardening | Internal beta with 5 users for one week. |
-
----
-
-## Performance Targets
-
-| Metric | Phase 1 | Phase 2 |
-|--------|---------|---------|
-| Time to First Insight (single file) | < 7 min | < 5 min |
-| Cleaning Plan Acceptance | ≥ 75% | ≥ 85% |
-| HITL Cycle Time | < 90s | < 60s |
-| Dashboard Latency (p95) | < 90s | < 60s |
-| Cost per Pipeline | ≤ $0.30 | ≤ $0.15 |
-| LLM Providers | Google Gemini 3.5 Flash | Additional as needed |
-
----
-
-## Domain Packs
-
-| Domain | KPIs |
-|--------|------|
-| Finance | revenue, COGS, gross margin, churn, MRR/ARR, runway |
-| Healthcare | patient counts, readmission rate, length of stay, ICD-10/CPT codes |
-| Retail/eCommerce | AOV, repeat purchase, SKU margin, inventory turn |
-| Marketing | CTR, CPA, CAC, LTV, attribution windows |
-| Operations | throughput, cycle time, generic counts |
-| Other | Free-text descriptor |
-
----
-
-## Development
+## Local Setup & Development
 
 ### Prerequisites
+* Python 3.11+
+* Node.js 20+
+* AWS CLI configured (or IAM access keys in `.env`)
 
-- Python 3.11+
-- Node.js 20+
-- Docker Desktop
-- pnpm
-
-### Local Setup
-
+### Backend Setup
 ```bash
-# Start local dependencies
-docker compose up -d
-
-# Backend
 cd backend
-uv venv && source .venv/bin/activate
-uv pip install -r requirements.txt
-uv run alembic upgrade head
-uv run uvicorn app.main:app --reload
 
-# Frontend
+# Install dependencies
+pip install -r requirements.txt
+
+# Run database migrations against Amazon RDS
+alembic upgrade head
+
+# Launch FastAPI development server
+uvicorn app.main:app --reload --port 8000
+```
+
+### Frontend Setup
+```bash
 cd frontend
+
+# Install dependencies
 pnpm install
+
+# Launch Next.js dev server
 pnpm dev
 ```
+Open [http://localhost:3000](http://localhost:3000) to access the DataMind AI interface.
 
 ---
 
 ## License
-
-Internal — Confidential
+Internal — Enterprise Confidential

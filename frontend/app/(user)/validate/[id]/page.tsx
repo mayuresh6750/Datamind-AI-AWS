@@ -6,13 +6,13 @@ import { SchemaTable } from '@/components/user/SchemaTable'
 import { MergeProposal } from '@/components/user/MergeProposal'
 import { HitlBanner } from '@/components/shared/HitlBanner'
 import { CheckCircle2, Loader2, RotateCcw } from 'lucide-react'
-import type { MergePlan } from '@/types/pipeline'
+import type { MergePlan, ColumnClassification } from '@/types/pipeline'
 
 export default function ValidatePage() {
   const { id } = useParams() as { id: string }
   const router = useRouter()
   const [plan, setPlan] = useState<MergePlan | null>(null)
-  const [typeOverrides, setTypeOverrides] = useState<Record<string, string>>({})
+  const [typeOverrides, setTypeOverrides] = useState<Record<string, ColumnClassification>>({})
   const [excludedColumns, setExcludedColumns] = useState<string[]>([])
   const [strategy, setStrategy] = useState<string | null>(null)
   const [joinKey, setJoinKey] = useState<string | null>(null)
@@ -76,7 +76,7 @@ export default function ValidatePage() {
           }))}
           excludedColumns={excludedColumns}
           onClassificationChange={(col, classification) =>
-            setTypeOverrides((prev) => ({ ...prev, [col]: classification }))
+            setTypeOverrides((prev) => ({ ...prev, [col]: classification as ColumnClassification }))
           }
           onExcludeToggle={(col, excluded) =>
             setExcludedColumns((prev) =>

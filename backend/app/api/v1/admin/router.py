@@ -9,8 +9,8 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db, get_supabase
-from app.core.security import require_admin
+from app.core.database import get_db
+from app.core.security import require_admin, hash_password
 from app.models.db import AuditLog, Dataset, LLMProviderConfig, PipelineRun, User
 
 log = structlog.get_logger()
@@ -65,35 +65,23 @@ async def create_user(
     if body.role not in ("user", "admin"):
         raise HTTPException(status_code=400, detail="role must be 'user' or 'admin'.")
 
-    supabase = get_supabase()
-
-    # Create user in Supabase Auth with role in metadata
-    try:
-        auth_response = supabase.auth.admin.create_user(
-            email=body.email,
-            password=body.password,
-            user_metadata={"role": body.role},
-            email_confirm=True,  # Auto-confirm email for admin-created users
-        )
-    except Exception as exc:
-        log.warning("create_user_auth_failed", email=body.email, error=str(exc))
+    # Check if user already exists
+    existing = await db.execute(select(User).where(User.email == body.email))
+    if existing.scalar_one_or_none() is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to create user in auth: {str(exc)}"
+            detail="User already registered with this email.",
         )
 
-    if auth_response.user is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to create user — unknown error."
-        )
+    # Determine tenant
+    admin_res = await db.execute(select(User).where(User.user_id == uuid.UUID(current_user["user_id"])))
+    admin_user = admin_res.scalar_one_or_none()
+    tenant_id = admin_user.tenant_id if admin_user else uuid.uuid4()
 
-    # Create user record in public.users table
-    user_id = uuid.UUID(str(auth_response.user.id))
     user = User(
-        user_id=user_id,
-        tenant_id=uuid.UUID(current_user["user_id"]),  # Assign to same tenant as admin
+        tenant_id=tenant_id,
         email=body.email,
+        hashed_password=hash_password(body.password),
         role=body.role,
         active_domain="other",
     )
@@ -189,21 +177,6 @@ async def update_user_role(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot demote the last admin account.",
             )
-
-    # Update auth provider first — it is the source of truth.
-    # Only persist to DB after a successful auth update to keep them in sync.
-    supabase = get_supabase()
-    try:
-        supabase.auth.admin.update_user_by_id(
-            str(user_id),
-            {"user_metadata": {"role": role}}
-        )
-    except Exception as exc:
-        log.warning("update_user_role_auth_failed", user_id=str(user_id), error=str(exc))
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Failed to update user role in auth provider.",
-        )
 
     user.role = role
     await db.commit()

@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
 import { BarChart2, LogOut, Settings } from 'lucide-react';
 
@@ -17,8 +16,11 @@ export default function Navbar() {
   const activeDomain = useAuthStore((s) => s.activeDomain);
   const clearAuth = useAuthStore((s) => s.clearAuth);
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut().catch(() => {});
+  const handleLogout = () => {
+    if (typeof document !== 'undefined') {
+      document.cookie = 'datamind_token=; path=/; max-age=0; SameSite=Lax';
+      document.cookie = 'datamind_role=; path=/; max-age=0; SameSite=Lax';
+    }
     clearAuth();
     router.push('/login');
   };

@@ -34,18 +34,22 @@ Rules:
   - "minimum", "lowest", "least", "worst", "fewest" → "min"
   - If ambiguous, default to "sum" for numeric columns and "count" for non-numeric.
 - filters: any WHERE conditions the user implied (e.g. "in 2023", "for category Electronics").
+- semantic_filter_concept: When the question filters, qualifies, or narrows down data using a qualitative concept, symptom, issue, complaint, or sentiment that lives in free-text columns (reviews, feedback, notes, comments) rather than an explicit categorical column (e.g. "battery issues", "delivery delays", "post-surgery infections", "billing disputes"), extract that exact semantic concept phrase here. If there is no free-text semantic concept, leave as null.
 - suggested_chart_types: 1-3 chart types from [line, bar, table, scatter, pie].
 - restatement: rephrase the question in clear domain-specific terms to confirm understanding.
 - confidence: float 0.0–1.0 reflecting how clearly the question maps to available columns.
 
 Examples:
-  "total quantity ordered by product category" → dimensions: ["Product_Category"], measures: ["Quantity_Ordered"], aggregation: "sum"
-  "average order value by city" → dimensions: ["City"], measures: ["Order_Value"], aggregation: "avg"
-  "which product had the highest revenue?" → dimensions: ["Product"], measures: ["Revenue"], aggregation: "max"
-  "how many orders per region?" → dimensions: ["Region"], measures: [], aggregation: "count"
-  "top 5 products by sales" → dimensions: ["Product"], measures: ["Sales"], aggregation: "sum"
-  "lab_test wise average test_cost" → dimensions: ["Lab_Test"], measures: ["Test_Cost"], aggregation: "avg"
-  "citywise diagnosis chart with counts" → dimensions: ["City", "Diagnosis"], measures: [], aggregation: "count"
+  "total revenue lost to battery issues" → dimensions: [], measures: ["Revenue"], aggregation: "sum", semantic_filter_concept: "battery issues"
+  "how many patients readmitted due to post-surgery infections?" → dimensions: [], measures: [], aggregation: "count", semantic_filter_concept: "post-surgery infections"
+  "average order value for customers complaining about delivery delays" → dimensions: [], measures: ["Order_Value"], aggregation: "avg", semantic_filter_concept: "delivery delays"
+  "total quantity ordered by product category" → dimensions: ["Product_Category"], measures: ["Quantity_Ordered"], aggregation: "sum", semantic_filter_concept: null
+  "average order value by city" → dimensions: ["City"], measures: ["Order_Value"], aggregation: "avg", semantic_filter_concept: null
+  "which product had the highest revenue?" → dimensions: ["Product"], measures: ["Revenue"], aggregation: "max", semantic_filter_concept: null
+  "how many orders per region?" → dimensions: ["Region"], measures: [], aggregation: "count", semantic_filter_concept: null
+  "top 5 products by sales" → dimensions: ["Product"], measures: ["Sales"], aggregation: "sum", semantic_filter_concept: null
+  "lab_test wise average test_cost" → dimensions: ["Lab_Test"], measures: ["Test_Cost"], aggregation: "avg", semantic_filter_concept: null
+  "citywise diagnosis chart with counts" → dimensions: ["City", "Diagnosis"], measures: [], aggregation: "count", semantic_filter_concept: null
   IMPORTANT: When the user says "X wise", "X-wise", or "Xwise" (no space), X is the primary grouping dimension.
   If they also name another categorical column (e.g. "citywise diagnosis"), include both dimensions with count aggregation.
 """.strip()
@@ -197,7 +201,25 @@ class IntentAgent:
             if spec.aggregation == "count":
                 spec.measures = []
 
+        if not spec.semantic_filter_concept:
+            spec.semantic_filter_concept = self._extract_semantic_concept(question, profiles)
+
         return spec
+
+    def _extract_semantic_concept(self, question: str, profiles: list[ColumnProfile]) -> str | None:
+        """Extract semantic qualifying concepts (e.g. 'battery issues', 'delivery delays') from question."""
+        patterns = [
+            r"\b(?:due to|lost to|complaining about|complained about|issues? with|related to|because of|suffering from)\s+([a-zA-Z0-9_\s\-]+?)(?:\?|$|\bfor\b|\bby\b|\bin\b)",
+            r"\b(?:about|with)\s+([a-zA-Z0-9_\s\-]+?\s+(?:issues?|problems?|delays?|infections?|complaints?|defects?|errors?|faults?))(?:\?|$|\bfor\b|\bby\b|\bin\b)",
+        ]
+        col_names_lower = {p.name.lower() for p in profiles}
+        for pattern in patterns:
+            m = re.search(pattern, question, re.I)
+            if m:
+                concept = m.group(1).strip().strip("'\"")
+                if concept.lower() not in col_names_lower and len(concept) > 2:
+                    return concept
+        return None
 
     @staticmethod
     def _question_requests_count(question: str) -> bool:
@@ -353,6 +375,8 @@ class IntentAgent:
         else:
             chart_types = ["bar", "table"]
 
+        semantic_concept = self._extract_semantic_concept(question, profiles)
+
         return AnalysisSpec(
             reasoning="Heuristic fallback used due to LLM failure or timeout.",
             original_question=question,
@@ -362,4 +386,5 @@ class IntentAgent:
             suggested_chart_types=chart_types,
             restatement=question,
             confidence=0.4,
+            semantic_filter_concept=semantic_concept,
         )
